@@ -3820,6 +3820,103 @@ function analyticsStudentKey(
 }
 
 
+function normalizeCourseTopicName(v) {
+
+  let name =
+    String(v || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[يى]/g, "ی")
+      .replace(/ك/g, "ک")
+      .replace(/\u200c/g, " ")
+      .replace(/\s+/g, " ");
+
+
+  /*
+    Course runs such as:
+      "دوره اول اصول جراحی و بخیه"
+      "دوره دوم اصول جراحی و بخیه"
+    must be treated as ONE educational topic in student analytics.
+
+    Remove run/order markers only from the beginning/end,
+    while preserving the real course title.
+  */
+  const ordinalWords =
+    [
+      "اول",
+      "دوم",
+      "سوم",
+      "چهارم",
+      "پنجم",
+      "ششم",
+      "هفتم",
+      "هشتم",
+      "نهم",
+      "دهم",
+      "یازدهم",
+      "دوازدهم"
+    ].join("|");
+
+
+  name =
+    name
+      .replace(
+        new RegExp(
+          `^\\s*دوره\\s+(?:${ordinalWords}|[0-9۰-۹]+)\\s+`,
+          "i"
+        ),
+        ""
+      )
+      .replace(
+        new RegExp(
+          `\\s*(?:[-–—|]\\s*)?(?:دوره\\s*)?(?:${ordinalWords}|[0-9۰-۹]+)\\s*$`,
+          "i"
+        ),
+        ""
+      )
+      .replace(
+        /\s*\(\s*(?:[0-9۰-۹]+)\s*\)\s*$/i,
+        ""
+      )
+      .replace(/\s+/g, " ")
+      .trim();
+
+
+  return name;
+}
+
+
+function courseTopicKey(course) {
+
+  const normalized =
+    normalizeCourseTopicName(
+      course.course_name
+    );
+
+  return normalized
+    ? `topic:${normalized}`
+    : `course:${String(
+        course.course_id ||
+        ""
+      )}`;
+}
+
+
+function courseTopicLabel(course) {
+
+  const normalized =
+    normalizeCourseTopicName(
+      course.course_name
+    );
+
+  return (
+    normalized ||
+    course.course_name ||
+    "دوره"
+  );
+}
+
+
 function courseSortValue(course) {
   return String(
     course.start_date ||
@@ -3842,16 +3939,60 @@ function buildStudentAnalytics() {
             )
       );
 
+
+  /*
+    Distinguish:
+    - course run = each actual execution / cohort
+    - course topic = unique educational product/title
+
+    Example:
+      دوره اول اصول جراحی و بخیه
+      دوره دوم اصول جراحی و بخیه
+    are 2 runs but 1 topic.
+  */
+  const topicMap =
+    new Map();
+
+  courses.forEach(
+    course => {
+
+      const key =
+        courseTopicKey(course);
+
+      if (!topicMap.has(key)) {
+        topicMap.set(
+          key,
+          {
+            key,
+            label:
+              courseTopicLabel(
+                course
+              ),
+            runs:[]
+          }
+        );
+      }
+
+      topicMap
+        .get(key)
+        .runs
+        .push(course);
+    }
+  );
+
+  const topics =
+    [...topicMap.values()];
+
+
   const people =
     new Map();
 
-  /*
-    Build a safe identity alias table before grouping:
-    normalized name -> set of known mobiles.
 
-    This lets a historical "name-only" registration join a newer
-    record for the same student when that name has exactly one known
-    mobile across the academy.
+  /*
+    Identity alias:
+    normalized name -> known mobiles.
+    A no-mobile legacy record is merged only if the same name
+    maps to exactly one known mobile.
   */
   const nameToMobiles =
     new Map();
@@ -3934,6 +4075,14 @@ function buildStudentAnalytics() {
         return {
           course,
           index,
+          topic_key:
+            courseTopicKey(
+              course
+            ),
+          topic_label:
+            courseTopicLabel(
+              course
+            ),
           students:
             [...unique.entries()]
               .map(
@@ -3954,6 +4103,7 @@ function buildStudentAnalytics() {
         ({key,student}) => {
 
           if (!people.has(key)) {
+
             people.set(
               key,
               {
@@ -3964,8 +4114,9 @@ function buildStudentAnalytics() {
                 mobile:
                   student.mobile ||
                   "",
-                courses:[],
-                first_course_index:
+                runs:[],
+                topics:[],
+                first_run_index:
                   row.index,
                 first_course_date:
                   courseSortValue(
@@ -3979,11 +4130,13 @@ function buildStudentAnalytics() {
             );
           }
 
+
           const person =
             people.get(key);
 
+
           if (
-            !person.courses.some(
+            !person.runs.some(
               c =>
                 String(c.course_id) ===
                 String(
@@ -3991,10 +4144,31 @@ function buildStudentAnalytics() {
                 )
             )
           ) {
-            person.courses.push(
+            person.runs.push(
               row.course
             );
           }
+
+
+          if (
+            !person.topics.some(
+              t =>
+                String(t.key) ===
+                String(
+                  row.topic_key
+                )
+            )
+          ) {
+            person.topics.push(
+              {
+                key:
+                  row.topic_key,
+                label:
+                  row.topic_label
+              }
+            );
+          }
+
 
           const rowDate =
             courseSortValue(
@@ -4008,7 +4182,7 @@ function buildStudentAnalytics() {
           ) {
             person.first_course_date =
               rowDate;
-            person.first_course_index =
+            person.first_run_index =
               row.index;
           }
 
@@ -4020,6 +4194,7 @@ function buildStudentAnalytics() {
             person.latest_course_date =
               rowDate;
           }
+
 
           if (
             !person.mobile &&
@@ -4051,8 +4226,30 @@ function buildStudentAnalytics() {
       .map(
         person => ({
           ...person,
+
+          /*
+            course_count now means UNIQUE educational topics,
+            not number of cohorts/runs attended.
+          */
           course_count:
-            person.courses.length
+            person.topics.length,
+
+          run_count:
+            person.runs.length,
+
+          /*
+            Keep .courses for the existing list renderer,
+            but make it topic-based.
+          */
+          courses:
+            person.topics.map(
+              t => ({
+                course_name:
+                  t.label,
+                course_id:
+                  t.key
+              })
+            )
         })
       )
       .sort(
@@ -4072,32 +4269,42 @@ function buildStudentAnalytics() {
 
   const oneCourse =
     students.filter(
-      s => s.course_count === 1
+      s =>
+        s.course_count === 1
     ).length;
 
   const twoCourses =
     students.filter(
-      s => s.course_count === 2
+      s =>
+        s.course_count === 2
     ).length;
 
   const threePlus =
     students.filter(
-      s => s.course_count >= 3
+      s =>
+        s.course_count >= 3
     ).length;
 
   const repeatStudents =
     students.filter(
-      s => s.course_count >= 2
+      s =>
+        s.course_count >= 2
     ).length;
 
+
+  /*
+    "All courses" means all UNIQUE educational topics,
+    not every repeated cohort.
+  */
   const allCoursesCount =
-    courses.length
+    topics.length
       ? students.filter(
           s =>
             s.course_count ===
-            courses.length
+            topics.length
         ).length
       : 0;
+
 
   const totalEnrollments =
     students.reduce(
@@ -4106,6 +4313,16 @@ function buildStudentAnalytics() {
         s.course_count,
       0
     );
+
+
+  const totalRunEnrollments =
+    students.reduce(
+      (sum,s) =>
+        sum +
+        s.run_count,
+      0
+    );
+
 
   const avgCourses =
     totalStudents
@@ -4122,6 +4339,7 @@ function buildStudentAnalytics() {
           courses.length - 1
         ]
       : null;
+
 
   let latestStudents = [];
   let latestNew = [];
@@ -4143,16 +4361,25 @@ function buildStudentAnalytics() {
         ? latestRow.students
         : [];
 
+
     latestStudents.forEach(
       ({key}) => {
 
         const person =
           people.get(key);
 
-        if (!person) return;
+        if (!person)
+          return;
 
-        const hadEarlier =
-          person.courses.some(
+
+        /*
+          A returning student is someone who attended ANY earlier
+          academy run before the latest run.
+          This is independent of whether the earlier run had the same
+          topic or a different topic.
+        */
+        const hadEarlierRun =
+          person.runs.some(
             c => {
 
               const idx =
@@ -4174,7 +4401,8 @@ function buildStudentAnalytics() {
             }
           );
 
-        if (hadEarlier) {
+
+        if (hadEarlierRun) {
           latestReturning.push(
             person
           );
@@ -4188,6 +4416,11 @@ function buildStudentAnalytics() {
   }
 
 
+  /*
+    Per-run report:
+    new vs returning is based on prior academy attendance,
+    but the student's total course count remains topic-based.
+  */
   const courseBreakdown =
     courseRows.map(
       row => {
@@ -4201,22 +4434,50 @@ function buildStudentAnalytics() {
             const person =
               people.get(key);
 
-            if (!person) return;
+            if (!person)
+              return;
 
-            if (
-              person.first_course_index ===
-              row.index
-            ) {
-              newCount++;
-            } else {
+
+            const hadEarlierRun =
+              person.runs.some(
+                c => {
+
+                  const idx =
+                    courses.findIndex(
+                      x =>
+                        String(
+                          x.course_id
+                        ) ===
+                        String(
+                          c.course_id
+                        )
+                    );
+
+                  return (
+                    idx >= 0 &&
+                    idx <
+                      row.index
+                  );
+                }
+              );
+
+
+            if (hadEarlierRun) {
               returningCount++;
+            } else {
+              newCount++;
             }
           }
         );
 
+
         return {
           course:
             row.course,
+          topic_key:
+            row.topic_key,
+          topic_label:
+            row.topic_label,
           total:
             row.students.length,
           newCount,
@@ -4239,16 +4500,23 @@ function buildStudentAnalytics() {
   const topStudents =
     students
       .filter(
-        s => s.course_count >= 2
+        s =>
+          s.course_count >= 2
       )
       .slice(0,10);
 
 
   return {
     courses,
+    topics,
+    courseRunCount:
+      courses.length,
+    uniqueCourseCount:
+      topics.length,
     students,
     totalStudents,
     totalEnrollments,
+    totalRunEnrollments,
     oneCourse,
     twoCourses,
     threePlus,
@@ -4263,7 +4531,6 @@ function buildStudentAnalytics() {
     topStudents
   };
 }
-
 
 function percentOf(part,total) {
   return total
@@ -4318,7 +4585,7 @@ function renderStudentAnalytics() {
           تحلیل مشتریان و دانشجویان
         </h3>
         <p>
-          تطبیق دانشجو با شماره موبایل انجام می‌شود؛ رکوردهای قدیمی بدون موبایل، فقط وقتی نامشان دقیقاً به یک موبایل یکتا برسد با همان دانشجو ادغام می‌شوند.
+          تحلیل بر اساس «عنوان آموزشی یکتا» انجام می‌شود؛ اجرای اول و دوم یک عنوان، دو دوره متفاوت برای وفاداری محسوب نمی‌شوند. تطبیق دانشجو نیز با شماره موبایل و رکوردهای قدیمی هم‌نام انجام می‌شود.
         </p>
       </div>
 
@@ -4338,11 +4605,18 @@ function renderStudentAnalytics() {
     >
 
       <div class="kpi">
-        <span>کل دوره‌ها</span>
+        <span>عناوین آموزشی یکتا</span>
         <strong>
-          ${faNum(a.courses.length)}
+          ${faNum(
+            a.uniqueCourseCount
+          )}
         </strong>
-        <small>دوره ثبت‌شده</small>
+        <small>
+          ${faNum(
+            a.courseRunCount
+          )}
+          اجرای دوره
+        </small>
       </div>
 
       <div class="kpi success">
@@ -4354,11 +4628,18 @@ function renderStudentAnalytics() {
       </div>
 
       <div class="kpi">
-        <span>کل ثبت‌نام‌ها</span>
+        <span>کل تجربه آموزشی</span>
         <strong>
-          ${faNum(a.totalEnrollments)}
+          ${faNum(
+            a.totalEnrollments
+          )}
         </strong>
-        <small>مجموع حضور در دوره‌ها</small>
+        <small>
+          ${faNum(
+            a.totalRunEnrollments
+          )}
+          حضور در اجراها
+        </small>
       </div>
 
       <div class="kpi warning">
@@ -4426,7 +4707,7 @@ function renderStudentAnalytics() {
       </div>
 
       <div class="kpi">
-        <span>شرکت در همه دوره‌ها</span>
+        <span>شرکت در همه عناوین آموزشی</span>
         <strong>
           ${faNum(
             percentOf(
@@ -4580,7 +4861,7 @@ function renderStudentAnalytics() {
 
           <div>
             <span>
-              میانگین دوره به ازای هر دانشجو
+              میانگین عنوان آموزشی به ازای هر دانشجو
             </span>
             <strong>
               ${
@@ -4664,6 +4945,11 @@ function renderStudentAnalytics() {
                             ${dateFa(
                               row.course
                                 .start_date
+                            )}
+                            ·
+                            عنوان آموزشی:
+                            ${esc(
+                              row.topic_label
                             )}
                           </span>
                         </div>
@@ -4914,7 +5200,7 @@ function renderStudentAnalytics() {
         <div>
           <h3>فهرست کامل دانشجویان</h3>
           <p>
-            تعداد دوره و نام دوره‌های هر دانشجو
+            تعداد عناوین آموزشی متفاوت و نام آنها برای هر دانشجو
           </p>
         </div>
 
@@ -5094,7 +5380,7 @@ function renderStudentAnalyticsList(
                     ${faNum(
                       s.course_count
                     )}
-                    دوره
+                    عنوان
                   </b>
 
                   <small>
