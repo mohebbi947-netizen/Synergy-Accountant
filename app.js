@@ -4248,6 +4248,268 @@ function openCourse(id) {
 
     </section>
 
+    <section
+      class="panel"
+      style="margin-bottom:14px"
+    >
+
+      <div class="panel-head">
+
+        <div>
+          <h3>مصرفی‌های این دوره</h3>
+          <p>
+            ریز تمام کالاها و دفعات مصرف ثبت‌شده برای این دوره
+          </p>
+        </div>
+
+        <span class="count">
+          ${faNum(m.consumptions.length)}
+        </span>
+
+      </div>
+
+
+      <div
+        class="finance-strip"
+        style="margin-bottom:12px"
+      >
+
+        <div>
+          <span>تعداد رکورد مصرف</span>
+          <strong>
+            ${faNum(m.consumptions.length)}
+          </strong>
+        </div>
+
+        <div>
+          <span>هزینه مصرفی‌های دوره</span>
+          <strong>
+            ${money(m.inventoryCost)}
+          </strong>
+        </div>
+
+        <div>
+          <span>تعداد کالای متفاوت</span>
+          <strong>
+            ${faNum(
+              new Set(
+                m.consumptions.map(
+                  x =>
+                    String(
+                      x.product_id ||
+                      x.product_name ||
+                      ""
+                    )
+                )
+              ).size
+            )}
+          </strong>
+        </div>
+
+      </div>
+
+
+      ${
+        m.consumptions.length
+          ? `
+            <div
+              style="
+                display:grid;
+                gap:8px;
+              "
+            >
+              ${
+                m.consumptions
+                  .slice()
+                  .sort(
+                    (a,b) =>
+                      String(
+                        b.consumption_date ||
+                        b.created_at ||
+                        ""
+                      ).localeCompare(
+                        String(
+                          a.consumption_date ||
+                          a.created_at ||
+                          ""
+                        )
+                      )
+                  )
+                  .map(
+                    c => {
+
+                      const product =
+                        state.products.find(
+                          p =>
+                            String(
+                              p.product_id
+                            ) ===
+                            String(
+                              c.product_id
+                            )
+                        );
+
+                      const isMulti =
+                        String(
+                          c.consumption_mode ||
+                          ""
+                        ) ===
+                        "multi_use" ||
+                        String(
+                          product?.usage_type ||
+                          ""
+                        ) ===
+                        "multi";
+
+                      const unitLabel =
+                        c.unit ||
+                        (
+                          isMulti
+                            ? "بار استفاده"
+                            : product?.unit ||
+                              "عدد"
+                        );
+
+                      return `
+                        <div
+                          class="lead-row"
+                          style="
+                            cursor:default;
+                            align-items:flex-start;
+                          "
+                        >
+
+                          <div class="avatar">
+                            ${
+                              isMulti
+                                ? "↻"
+                                : "◉"
+                            }
+                          </div>
+
+
+                          <div class="lead-main">
+
+                            <b>
+                              ${esc(
+                                c.product_name ||
+                                product?.product_name ||
+                                "کالا"
+                              )}
+                            </b>
+
+                            <span>
+                              مقدار:
+                              <strong>
+                                ${faNum(c.quantity)}
+                                ${esc(unitLabel)}
+                              </strong>
+
+                              ·
+
+                              قیمت واحد:
+                              <strong>
+                                ${money(c.unit_cost)}
+                              </strong>
+                            </span>
+
+                            <span>
+                              تاریخ مصرف:
+                              ${dateFa(
+                                c.consumption_date ||
+                                c.created_at
+                              )}
+
+                              ${
+                                c.notes
+                                  ? `
+                                    ·
+                                    ${esc(c.notes)}
+                                  `
+                                  : ""
+                              }
+                            </span>
+
+                          </div>
+
+
+                          <div
+                            class="lead-end"
+                            style="
+                              min-width:118px;
+                              align-items:flex-end;
+                            "
+                          >
+
+                            <b>
+                              ${money(c.total_cost)}
+                            </b>
+
+                            <em
+                              class="badge ${
+                                isMulti
+                                  ? "blue"
+                                  : "green"
+                              }"
+                            >
+                              ${
+                                isMulti
+                                  ? "چندبارمصرف"
+                                  : "مصرفی"
+                              }
+                            </em>
+
+                            <div
+                              style="
+                                display:flex;
+                                gap:5px;
+                                margin-top:6px;
+                              "
+                            >
+                              <button
+                                type="button"
+                                class="secondary glass-button mini-edit-btn"
+                                data-course-consumption-edit="${esc(
+                                  c.consumption_id
+                                )}"
+                              >
+                                ویرایش
+                              </button>
+
+                              <button
+                                type="button"
+                                class="danger-action mini-edit-btn"
+                                data-course-consumption-delete="${esc(
+                                  c.consumption_id
+                                )}"
+                              >
+                                حذف
+                              </button>
+                            </div>
+
+                          </div>
+
+                        </div>
+                      `;
+                    }
+                  )
+                  .join("")
+              }
+            </div>
+          `
+          : `
+            <div class="empty">
+              <b>هنوز مصرفی برای این دوره ثبت نشده</b>
+              <span>
+                مصرف کالاهای این دوره از بخش انبار ثبت می‌شود.
+              </span>
+            </div>
+          `
+      }
+
+    </section>
+
+
     <section class="panel">
 
       <div class="panel-head">
@@ -4316,6 +4578,132 @@ function openCourse(id) {
   if (paymentBtn)
     paymentBtn.onclick =
       () => newPayment(null, course);
+
+
+  $$("[data-course-consumption-edit]")
+    .forEach(
+      button => {
+
+        button.onclick =
+          () => {
+
+            const item =
+              state.consumptions.find(
+                c =>
+                  String(
+                    c.consumption_id
+                  ) ===
+                  String(
+                    button.dataset
+                      .courseConsumptionEdit
+                  )
+              );
+
+            if (item) {
+              editConsumption(
+                item
+              );
+            }
+          };
+      }
+    );
+
+
+  $$("[data-course-consumption-delete]")
+    .forEach(
+      button => {
+
+        button.onclick =
+          async () => {
+
+            const item =
+              state.consumptions.find(
+                c =>
+                  String(
+                    c.consumption_id
+                  ) ===
+                  String(
+                    button.dataset
+                      .courseConsumptionDelete
+                  )
+              );
+
+            if (!item) return;
+
+
+            const ok =
+              confirm(
+                `مصرف «${
+                  item.product_name ||
+                  "کالا"
+                }» حذف شود؟\n\nموجودی به انبار برمی‌گردد و هزینه از این دوره حذف می‌شود.`
+              );
+
+            if (!ok) return;
+
+
+            try {
+
+              button.disabled =
+                true;
+
+              button.textContent =
+                "در حال حذف...";
+
+
+              const result =
+                await post(
+                  "deleteConsumption",
+                  {
+                    consumption_id:
+                      item.consumption_id
+                  }
+                );
+
+
+              if (!result?.success) {
+                throw new Error(
+                  result?.message ||
+                  "حذف مصرف انجام نشد."
+                );
+              }
+
+
+              toast(
+                "مصرف حذف شد و موجودی به انبار برگشت"
+              );
+
+
+              await refreshInventoryData();
+
+
+              /*
+                Re-open the same course so the detailed list,
+                inventory cost and profit update immediately.
+              */
+              openCourse(
+                course.course_id
+              );
+
+
+            } catch (error) {
+
+              toast(
+                error.message ||
+                "حذف مصرف انجام نشد.",
+                true
+              );
+
+              button.disabled =
+                false;
+
+              button.textContent =
+                "حذف";
+            }
+          };
+      }
+    );
+
 
   const editBtn =
     $("#editCourseBtn");
