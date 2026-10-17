@@ -57,7 +57,8 @@ const navItems = [
   ["inventory", "◫", "انبار"],
   ["invoices", "▧", "فاکتورها"],
   ["todos", "✓", "یادداشت‌ها"],
-  ["reports", "▤", "گزارش"]
+  ["reports", "▤", "گزارش"],
+  ["studentAnalytics", "◉", "تحلیل دانشجویان"]
 ];
 
 
@@ -2513,7 +2514,8 @@ function render() {
     inventory: renderInventory,
     invoices: renderInvoices,
     todos: renderTodos,
-    reports: renderReports
+    reports: renderReports,
+    studentAnalytics: renderStudentAnalytics
   };
 
   const fn =
@@ -3053,12 +3055,28 @@ function renderLeads() {
 
       </div>
 
-      <button
-        class="primary"
-        data-action="newLead"
+      <div
+        style="
+          display:flex;
+          gap:8px;
+          flex-wrap:wrap;
+        "
       >
-        ＋ ثبت مشتری نهایی
-      </button>
+        <button
+          id="openStudentAnalytics"
+          type="button"
+          class="secondary glass-button"
+        >
+          ◉ تحلیل دانشجویان
+        </button>
+
+        <button
+          class="primary"
+          data-action="newLead"
+        >
+          ＋ ثبت مشتری نهایی
+        </button>
+      </div>
 
     </div>
 
@@ -3115,6 +3133,19 @@ function renderLeads() {
       bindCustomerClicks();
     };
 
+
+  const analyticsBtn =
+    $("#openStudentAnalytics");
+
+  if (analyticsBtn) {
+    analyticsBtn.onclick =
+      () => {
+        state.page =
+          "studentAnalytics";
+        initNav();
+        render();
+      };
+  }
 
   bindActions();
   bindCustomerClicks();
@@ -3678,6 +3709,1310 @@ async function deleteFinalCustomer(
 
     loading(false);
   }
+}
+
+
+
+/* =========================================================
+   STUDENT / CUSTOMER ANALYTICS
+========================================================= */
+
+function normalizeStudentMobile(v) {
+
+  let s =
+    String(v || "")
+      .replace(/\D/g, "");
+
+  if (s.startsWith("0098")) {
+    s = "0" + s.slice(4);
+  }
+
+  if (
+    s.startsWith("98") &&
+    s.length >= 12
+  ) {
+    s = "0" + s.slice(2);
+  }
+
+  return s;
+}
+
+
+function analyticsStudentKey(student) {
+
+  const mobile =
+    normalizeStudentMobile(
+      student.mobile
+    );
+
+  if (mobile) {
+    return `mobile:${mobile}`;
+  }
+
+  const name =
+    String(
+      student.full_name || ""
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+  if (name) {
+    return `name:${name}`;
+  }
+
+  if (student.student_id) {
+    return `student:${student.student_id}`;
+  }
+
+  if (student.lead_id) {
+    return `lead:${student.lead_id}`;
+  }
+
+  return `unknown:${
+    String(student.course_id || "")
+  }:${
+    String(student.created_at || "")
+  }`;
+}
+
+
+function courseSortValue(course) {
+  return String(
+    course.start_date ||
+    course.created_at ||
+    ""
+  );
+}
+
+
+function buildStudentAnalytics() {
+
+  const courses =
+    state.courses
+      .slice()
+      .sort(
+        (a,b) =>
+          courseSortValue(a)
+            .localeCompare(
+              courseSortValue(b)
+            )
+      );
+
+  const people =
+    new Map();
+
+  const courseRows =
+    courses.map(
+      (course,index) => {
+
+        const rawStudents =
+          courseStudents(
+            course.course_id
+          );
+
+        const unique =
+          new Map();
+
+        rawStudents.forEach(
+          student => {
+
+            const key =
+              analyticsStudentKey(
+                student
+              );
+
+            if (!unique.has(key)) {
+              unique.set(
+                key,
+                student
+              );
+            }
+          }
+        );
+
+        return {
+          course,
+          index,
+          students:
+            [...unique.entries()]
+              .map(
+                ([key,student]) => ({
+                  key,
+                  student
+                })
+              )
+        };
+      }
+    );
+
+
+  courseRows.forEach(
+    row => {
+
+      row.students.forEach(
+        ({key,student}) => {
+
+          if (!people.has(key)) {
+            people.set(
+              key,
+              {
+                key,
+                full_name:
+                  student.full_name ||
+                  "دانشجو",
+                mobile:
+                  student.mobile ||
+                  "",
+                courses:[],
+                first_course_index:
+                  row.index,
+                first_course_date:
+                  courseSortValue(
+                    row.course
+                  ),
+                latest_course_date:
+                  courseSortValue(
+                    row.course
+                  )
+              }
+            );
+          }
+
+          const person =
+            people.get(key);
+
+          if (
+            !person.courses.some(
+              c =>
+                String(c.course_id) ===
+                String(
+                  row.course.course_id
+                )
+            )
+          ) {
+            person.courses.push(
+              row.course
+            );
+          }
+
+          const rowDate =
+            courseSortValue(
+              row.course
+            );
+
+          if (
+            !person.first_course_date ||
+            rowDate <
+              person.first_course_date
+          ) {
+            person.first_course_date =
+              rowDate;
+            person.first_course_index =
+              row.index;
+          }
+
+          if (
+            !person.latest_course_date ||
+            rowDate >
+              person.latest_course_date
+          ) {
+            person.latest_course_date =
+              rowDate;
+          }
+
+          if (
+            !person.mobile &&
+            student.mobile
+          ) {
+            person.mobile =
+              student.mobile;
+          }
+
+          if (
+            (
+              !person.full_name ||
+              person.full_name ===
+                "دانشجو"
+            ) &&
+            student.full_name
+          ) {
+            person.full_name =
+              student.full_name;
+          }
+        }
+      );
+    }
+  );
+
+
+  const students =
+    [...people.values()]
+      .map(
+        person => ({
+          ...person,
+          course_count:
+            person.courses.length
+        })
+      )
+      .sort(
+        (a,b) =>
+          b.course_count -
+            a.course_count ||
+          String(a.full_name)
+            .localeCompare(
+              String(b.full_name),
+              "fa"
+            )
+      );
+
+
+  const totalStudents =
+    students.length;
+
+  const oneCourse =
+    students.filter(
+      s => s.course_count === 1
+    ).length;
+
+  const twoCourses =
+    students.filter(
+      s => s.course_count === 2
+    ).length;
+
+  const threePlus =
+    students.filter(
+      s => s.course_count >= 3
+    ).length;
+
+  const repeatStudents =
+    students.filter(
+      s => s.course_count >= 2
+    ).length;
+
+  const allCoursesCount =
+    courses.length
+      ? students.filter(
+          s =>
+            s.course_count ===
+            courses.length
+        ).length
+      : 0;
+
+  const totalEnrollments =
+    students.reduce(
+      (sum,s) =>
+        sum +
+        s.course_count,
+      0
+    );
+
+  const avgCourses =
+    totalStudents
+      ? (
+          totalEnrollments /
+          totalStudents
+        )
+      : 0;
+
+
+  const latestCourse =
+    courses.length
+      ? courses[
+          courses.length - 1
+        ]
+      : null;
+
+  let latestStudents = [];
+  let latestNew = [];
+  let latestReturning = [];
+
+
+  if (latestCourse) {
+
+    const latestIndex =
+      courses.length - 1;
+
+    const latestRow =
+      courseRows[
+        latestIndex
+      ];
+
+    latestStudents =
+      latestRow
+        ? latestRow.students
+        : [];
+
+    latestStudents.forEach(
+      ({key}) => {
+
+        const person =
+          people.get(key);
+
+        if (!person) return;
+
+        const hadEarlier =
+          person.courses.some(
+            c => {
+
+              const idx =
+                courses.findIndex(
+                  x =>
+                    String(
+                      x.course_id
+                    ) ===
+                    String(
+                      c.course_id
+                    )
+                );
+
+              return (
+                idx >= 0 &&
+                idx <
+                  latestIndex
+              );
+            }
+          );
+
+        if (hadEarlier) {
+          latestReturning.push(
+            person
+          );
+        } else {
+          latestNew.push(
+            person
+          );
+        }
+      }
+    );
+  }
+
+
+  const courseBreakdown =
+    courseRows.map(
+      row => {
+
+        let newCount = 0;
+        let returningCount = 0;
+
+        row.students.forEach(
+          ({key}) => {
+
+            const person =
+              people.get(key);
+
+            if (!person) return;
+
+            if (
+              person.first_course_index ===
+              row.index
+            ) {
+              newCount++;
+            } else {
+              returningCount++;
+            }
+          }
+        );
+
+        return {
+          course:
+            row.course,
+          total:
+            row.students.length,
+          newCount,
+          returningCount,
+          returningRate:
+            row.students.length
+              ? Math.round(
+                  (
+                    returningCount /
+                    row.students.length
+                  ) *
+                  100
+                )
+              : 0
+        };
+      }
+    );
+
+
+  const topStudents =
+    students
+      .filter(
+        s => s.course_count >= 2
+      )
+      .slice(0,10);
+
+
+  return {
+    courses,
+    students,
+    totalStudents,
+    totalEnrollments,
+    oneCourse,
+    twoCourses,
+    threePlus,
+    repeatStudents,
+    allCoursesCount,
+    avgCourses,
+    latestCourse,
+    latestStudents,
+    latestNew,
+    latestReturning,
+    courseBreakdown,
+    topStudents
+  };
+}
+
+
+function percentOf(part,total) {
+  return total
+    ? Math.round(
+        (
+          Number(part || 0) /
+          Number(total)
+        ) *
+        100
+      )
+    : 0;
+}
+
+
+function renderStudentAnalytics() {
+
+  title(
+    "تحلیل دانشجویان",
+    "رفتار، تکرار خرید و وفاداری دانشجویان آکادمی"
+  );
+
+  const a =
+    buildStudentAnalytics();
+
+  const repeatRate =
+    percentOf(
+      a.repeatStudents,
+      a.totalStudents
+    );
+
+  const latestNewRate =
+    percentOf(
+      a.latestNew.length,
+      a.latestStudents.length
+    );
+
+  const latestReturningRate =
+    percentOf(
+      a.latestReturning.length,
+      a.latestStudents.length
+    );
+
+
+  $("#content").innerHTML = `
+
+    <div
+      class="toolbar"
+      style="margin-bottom:14px"
+    >
+      <div>
+        <h3>
+          تحلیل مشتریان و دانشجویان
+        </h3>
+        <p>
+          هر دانشجو با شماره موبایل شناسایی می‌شود؛ در نبود موبایل، نام برای تطبیق استفاده می‌شود.
+        </p>
+      </div>
+
+      <button
+        id="backToCustomers"
+        type="button"
+        class="secondary glass-button"
+      >
+        ← فهرست مشتریان
+      </button>
+    </div>
+
+
+    <div
+      class="kpi-grid"
+      style="margin-top:0;margin-bottom:14px"
+    >
+
+      <div class="kpi">
+        <span>کل دوره‌ها</span>
+        <strong>
+          ${faNum(a.courses.length)}
+        </strong>
+        <small>دوره ثبت‌شده</small>
+      </div>
+
+      <div class="kpi success">
+        <span>دانشجوی یکتا</span>
+        <strong>
+          ${faNum(a.totalStudents)}
+        </strong>
+        <small>بدون شمارش تکراری</small>
+      </div>
+
+      <div class="kpi">
+        <span>کل ثبت‌نام‌ها</span>
+        <strong>
+          ${faNum(a.totalEnrollments)}
+        </strong>
+        <small>مجموع حضور در دوره‌ها</small>
+      </div>
+
+      <div class="kpi warning">
+        <span>نرخ بازگشت دانشجو</span>
+        <strong>
+          ${faNum(repeatRate)}٪
+        </strong>
+        <small>حداقل در ۲ دوره</small>
+      </div>
+
+    </div>
+
+
+    <div
+      class="kpi-grid"
+      style="margin-bottom:14px"
+    >
+
+      <div class="kpi">
+        <span>فقط ۱ دوره</span>
+        <strong>
+          ${faNum(
+            percentOf(
+              a.oneCourse,
+              a.totalStudents
+            )
+          )}٪
+        </strong>
+        <small>
+          ${faNum(a.oneCourse)}
+          دانشجو
+        </small>
+      </div>
+
+      <div class="kpi">
+        <span>دقیقاً ۲ دوره</span>
+        <strong>
+          ${faNum(
+            percentOf(
+              a.twoCourses,
+              a.totalStudents
+            )
+          )}٪
+        </strong>
+        <small>
+          ${faNum(a.twoCourses)}
+          دانشجو
+        </small>
+      </div>
+
+      <div class="kpi success">
+        <span>۳ دوره و بیشتر</span>
+        <strong>
+          ${faNum(
+            percentOf(
+              a.threePlus,
+              a.totalStudents
+            )
+          )}٪
+        </strong>
+        <small>
+          ${faNum(a.threePlus)}
+          دانشجو
+        </small>
+      </div>
+
+      <div class="kpi">
+        <span>شرکت در همه دوره‌ها</span>
+        <strong>
+          ${faNum(
+            percentOf(
+              a.allCoursesCount,
+              a.totalStudents
+            )
+          )}٪
+        </strong>
+        <small>
+          ${faNum(a.allCoursesCount)}
+          نفر
+        </small>
+      </div>
+
+    </div>
+
+
+    <div class="two-col">
+
+      <section class="panel">
+
+        <div class="panel-head">
+          <div>
+            <h3>جدیدترین دوره</h3>
+            <p>
+              سهم دانشجوی جدید در برابر دانشجوی بازگشتی
+            </p>
+          </div>
+
+          <span class="count">
+            ${faNum(
+              a.latestStudents.length
+            )}
+          </span>
+        </div>
+
+
+        ${
+          a.latestCourse
+            ? `
+              <div
+                style="
+                  margin-bottom:14px;
+                  line-height:1.9;
+                "
+              >
+                <b
+                  style="
+                    display:block;
+                    font-size:16px;
+                  "
+                >
+                  ${esc(
+                    a.latestCourse
+                      .course_name ||
+                    "دوره"
+                  )}
+                </b>
+
+                <span
+                  style="
+                    opacity:.65;
+                    font-size:11px;
+                  "
+                >
+                  ${dateFa(
+                    a.latestCourse
+                      .start_date
+                  )}
+                </span>
+              </div>
+
+
+              <div
+                class="finance-strip"
+                style="
+                  grid-template-columns:
+                    repeat(3,1fr);
+                "
+              >
+
+                <div>
+                  <span>دانشجوی جدید</span>
+                  <strong>
+                    ${faNum(
+                      a.latestNew.length
+                    )}
+                  </strong>
+                  <small>
+                    ${faNum(
+                      latestNewRate
+                    )}٪
+                  </small>
+                </div>
+
+                <div>
+                  <span>دانشجوی بازگشتی</span>
+                  <strong>
+                    ${faNum(
+                      a.latestReturning.length
+                    )}
+                  </strong>
+                  <small>
+                    ${faNum(
+                      latestReturningRate
+                    )}٪
+                  </small>
+                </div>
+
+                <div>
+                  <span>کل دانشجو</span>
+                  <strong>
+                    ${faNum(
+                      a.latestStudents.length
+                    )}
+                  </strong>
+                  <small>همین دوره</small>
+                </div>
+
+              </div>
+            `
+            : `
+              <div class="empty">
+                <b>هنوز دوره‌ای ثبت نشده</b>
+              </div>
+            `
+        }
+
+      </section>
+
+
+      <section class="panel">
+
+        <div class="panel-head">
+          <div>
+            <h3>شاخص وفاداری</h3>
+            <p>
+              تکرار حضور دانشجویان در دوره‌ها
+            </p>
+          </div>
+        </div>
+
+
+        <div
+          class="finance-strip"
+          style="
+            grid-template-columns:
+              repeat(2,1fr);
+          "
+        >
+
+          <div>
+            <span>
+              میانگین دوره به ازای هر دانشجو
+            </span>
+            <strong>
+              ${
+                a.avgCourses
+                  .toLocaleString(
+                    "fa-IR",
+                    {
+                      maximumFractionDigits:1
+                    }
+                  )
+              }
+            </strong>
+          </div>
+
+          <div>
+            <span>دانشجویان تکرارشونده</span>
+            <strong>
+              ${faNum(
+                a.repeatStudents
+              )}
+            </strong>
+            <small>
+              ${faNum(
+                repeatRate
+              )}٪ از کل
+            </small>
+          </div>
+
+        </div>
+
+      </section>
+
+    </div>
+
+
+    <section
+      class="panel"
+      style="margin-top:14px"
+    >
+
+      <div class="panel-head">
+        <div>
+          <h3>
+            عملکرد دانشجویی هر دوره
+          </h3>
+          <p>
+            تعداد کل، دانشجوی جدید و دانشجوی بازگشتی
+          </p>
+        </div>
+      </div>
+
+
+      ${
+        a.courseBreakdown.length
+          ? `
+            <div class="lead-list">
+              ${
+                a.courseBreakdown
+                  .slice()
+                  .reverse()
+                  .map(
+                    row => `
+                      <div
+                        class="lead-row"
+                        style="cursor:default"
+                      >
+
+                        <div class="avatar">
+                          ${faNum(row.total)}
+                        </div>
+
+                        <div class="lead-main">
+                          <b>
+                            ${esc(
+                              row.course
+                                .course_name ||
+                              "دوره"
+                            )}
+                          </b>
+                          <span>
+                            ${dateFa(
+                              row.course
+                                .start_date
+                            )}
+                          </span>
+                        </div>
+
+                        <div
+                          class="lead-end"
+                          style="min-width:210px"
+                        >
+                          <b>
+                            ${faNum(row.newCount)}
+                            جدید
+                            ·
+                            ${faNum(
+                              row.returningCount
+                            )}
+                            بازگشتی
+                          </b>
+                          <small>
+                            نرخ بازگشت:
+                            ${faNum(
+                              row.returningRate
+                            )}٪
+                          </small>
+                        </div>
+
+                      </div>
+                    `
+                  )
+                  .join("")
+              }
+            </div>
+          `
+          : `
+            <div class="empty">
+              <b>
+                داده‌ای برای تحلیل وجود ندارد
+              </b>
+            </div>
+          `
+      }
+
+    </section>
+
+
+    <div
+      class="two-col"
+      style="margin-top:14px"
+    >
+
+      <section class="panel">
+
+        <div class="panel-head">
+          <div>
+            <h3>وفادارترین دانشجویان</h3>
+            <p>
+              بیشترین تعداد دوره شرکت‌کرده
+            </p>
+          </div>
+          <span class="count">
+            ${faNum(
+              a.topStudents.length
+            )}
+          </span>
+        </div>
+
+
+        ${
+          a.topStudents.length
+            ? `
+              <div class="lead-list">
+                ${
+                  a.topStudents
+                    .map(
+                      s => `
+                        <div
+                          class="lead-row"
+                          style="cursor:default"
+                        >
+
+                          <div class="avatar">
+                            ${esc(
+                              String(
+                                s.full_name ||
+                                "?"
+                              )[0] || "?"
+                            )}
+                          </div>
+
+                          <div class="lead-main">
+                            <b>
+                              ${esc(
+                                s.full_name
+                              )}
+                            </b>
+                            <span>
+                              ${esc(
+                                s.mobile ||
+                                "بدون موبایل"
+                              )}
+                            </span>
+                          </div>
+
+                          <div class="lead-end">
+                            <b>
+                              ${faNum(
+                                s.course_count
+                              )}
+                              دوره
+                            </b>
+                          </div>
+
+                        </div>
+                      `
+                    )
+                    .join("")
+                }
+              </div>
+            `
+            : `
+              <div class="empty">
+                <b>
+                  هنوز دانشجوی تکرارشونده نداریم
+                </b>
+              </div>
+            `
+        }
+
+      </section>
+
+
+      <section class="panel">
+
+        <div class="panel-head">
+          <div>
+            <h3>ترکیب دانشجویان</h3>
+            <p>
+              توزیع تعداد دوره‌های شرکت‌کرده
+            </p>
+          </div>
+        </div>
+
+
+        <div
+          style="
+            display:grid;
+            gap:10px;
+          "
+        >
+
+          ${
+            [
+              {
+                label:"فقط یک دوره",
+                count:a.oneCourse
+              },
+              {
+                label:"دو دوره",
+                count:a.twoCourses
+              },
+              {
+                label:"سه دوره و بیشتر",
+                count:a.threePlus
+              }
+            ]
+              .map(
+                item => {
+
+                  const pct =
+                    percentOf(
+                      item.count,
+                      a.totalStudents
+                    );
+
+                  return `
+                    <div>
+
+                      <div
+                        style="
+                          display:flex;
+                          justify-content:space-between;
+                          gap:10px;
+                          margin-bottom:6px;
+                          font-size:11px;
+                        "
+                      >
+                        <span>
+                          ${item.label}
+                        </span>
+
+                        <b>
+                          ${faNum(item.count)}
+                          نفر
+                          ·
+                          ${faNum(pct)}٪
+                        </b>
+                      </div>
+
+                      <div
+                        style="
+                          height:8px;
+                          border-radius:999px;
+                          background:
+                            rgba(
+                              255,
+                              255,
+                              255,
+                              .08
+                            );
+                          overflow:hidden;
+                        "
+                      >
+                        <i
+                          style="
+                            display:block;
+                            height:100%;
+                            width:${pct}%;
+                            border-radius:inherit;
+                            background:
+                              linear-gradient(
+                                90deg,
+                                var(--cyan),
+                                var(--pink)
+                              );
+                          "
+                        ></i>
+                      </div>
+
+                    </div>
+                  `;
+                }
+              )
+              .join("")
+          }
+
+        </div>
+
+      </section>
+
+    </div>
+
+
+    <section
+      class="panel"
+      style="margin-top:14px"
+    >
+
+      <div class="panel-head">
+        <div>
+          <h3>فهرست کامل دانشجویان</h3>
+          <p>
+            تعداد دوره و نام دوره‌های هر دانشجو
+          </p>
+        </div>
+
+        <span class="count">
+          ${faNum(
+            a.students.length
+          )}
+        </span>
+      </div>
+
+
+      <div
+        class="search"
+        style="margin-bottom:12px"
+      >
+        <span>⌕</span>
+
+        <input
+          id="studentAnalyticsSearch"
+          placeholder="جستجو نام، موبایل یا نام دوره..."
+        >
+      </div>
+
+
+      <div id="studentAnalyticsList">
+        ${
+          renderStudentAnalyticsList(
+            a.students
+          )
+        }
+      </div>
+
+    </section>
+  `;
+
+
+  const back =
+    $("#backToCustomers");
+
+  if (back) {
+    back.onclick =
+      () => {
+        state.page =
+          "leads";
+        initNav();
+        render();
+      };
+  }
+
+
+  const search =
+    $("#studentAnalyticsSearch");
+
+  if (search) {
+    search.oninput =
+      e => {
+
+        const q =
+          String(
+            e.target.value || ""
+          )
+            .trim()
+            .toLowerCase();
+
+        const filtered =
+          a.students.filter(
+            s => {
+
+              const haystack =
+                [
+                  s.full_name,
+                  s.mobile,
+                  ...s.courses.map(
+                    c =>
+                      c.course_name ||
+                      ""
+                  )
+                ]
+                  .join(" ")
+                  .toLowerCase();
+
+              return (
+                !q ||
+                haystack.includes(q)
+              );
+            }
+          );
+
+        $("#studentAnalyticsList")
+          .innerHTML =
+            renderStudentAnalyticsList(
+              filtered
+            );
+      };
+  }
+}
+
+
+function renderStudentAnalyticsList(
+  students
+) {
+
+  if (!students.length) {
+    return `
+      <div class="empty">
+        <b>
+          دانشجویی برای نمایش پیدا نشد
+        </b>
+      </div>
+    `;
+  }
+
+
+  return `
+    <div class="lead-list">
+      ${
+        students
+          .map(
+            s => `
+              <div
+                class="lead-row"
+                style="
+                  cursor:default;
+                  align-items:flex-start;
+                "
+              >
+
+                <div class="avatar">
+                  ${esc(
+                    String(
+                      s.full_name || "?"
+                    )[0] || "?"
+                  )}
+                </div>
+
+
+                <div class="lead-main">
+                  <b>
+                    ${esc(
+                      s.full_name
+                    )}
+                  </b>
+
+                  <span>
+                    ${esc(
+                      s.mobile ||
+                      "بدون موبایل"
+                    )}
+                  </span>
+
+                  <span
+                    style="
+                      margin-top:4px;
+                      line-height:1.9;
+                    "
+                  >
+                    ${
+                      s.courses
+                        .map(
+                          c =>
+                            esc(
+                              c.course_name ||
+                              "دوره"
+                            )
+                        )
+                        .join(" · ")
+                    }
+                  </span>
+                </div>
+
+
+                <div
+                  class="lead-end"
+                  style="min-width:92px"
+                >
+                  <b>
+                    ${faNum(
+                      s.course_count
+                    )}
+                    دوره
+                  </b>
+
+                  <small>
+                    ${
+                      s.course_count >= 2
+                        ? "بازگشتی"
+                        : "تک‌دوره"
+                    }
+                  </small>
+                </div>
+
+              </div>
+            `
+          )
+          .join("")
+      }
+    </div>
+  `;
 }
 
 
