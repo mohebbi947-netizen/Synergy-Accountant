@@ -3738,7 +3738,22 @@ function normalizeStudentMobile(v) {
 }
 
 
-function analyticsStudentKey(student) {
+function normalizeStudentName(v) {
+
+  return String(v || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[يى]/g, "ی")
+    .replace(/ك/g, "ک")
+    .replace(/\u200c/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+
+function analyticsStudentKey(
+  student,
+  nameToMobiles = null
+) {
 
   const mobile =
     normalizeStudentMobile(
@@ -3750,12 +3765,40 @@ function analyticsStudentKey(student) {
   }
 
   const name =
-    String(
-      student.full_name || ""
-    )
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ");
+    normalizeStudentName(
+      student.full_name
+    );
+
+  /*
+    If this record has no mobile but the same normalized name appears
+    elsewhere with exactly ONE known mobile, treat them as the same
+    student. This fixes legacy records where one course has a mobile
+    and another course only has the name.
+
+    If the same name is associated with multiple different mobiles,
+    we intentionally do NOT auto-merge because that could combine
+    two different people.
+  */
+  if (
+    !mobile &&
+    name &&
+    nameToMobiles &&
+    nameToMobiles.has(name)
+  ) {
+
+    const knownMobiles =
+      [
+        ...nameToMobiles.get(name)
+      ];
+
+    if (
+      knownMobiles.length === 1
+    ) {
+      return (
+        `mobile:${knownMobiles[0]}`
+      );
+    }
+  }
 
   if (name) {
     return `name:${name}`;
@@ -3802,6 +3845,62 @@ function buildStudentAnalytics() {
   const people =
     new Map();
 
+  /*
+    Build a safe identity alias table before grouping:
+    normalized name -> set of known mobiles.
+
+    This lets a historical "name-only" registration join a newer
+    record for the same student when that name has exactly one known
+    mobile across the academy.
+  */
+  const nameToMobiles =
+    new Map();
+
+  courses.forEach(
+    course => {
+
+      courseStudents(
+        course.course_id
+      ).forEach(
+        student => {
+
+          const name =
+            normalizeStudentName(
+              student.full_name
+            );
+
+          const mobile =
+            normalizeStudentMobile(
+              student.mobile
+            );
+
+          if (
+            !name ||
+            !mobile
+          ) {
+            return;
+          }
+
+          if (
+            !nameToMobiles.has(
+              name
+            )
+          ) {
+            nameToMobiles.set(
+              name,
+              new Set()
+            );
+          }
+
+          nameToMobiles
+            .get(name)
+            .add(mobile);
+        }
+      );
+    }
+  );
+
+
   const courseRows =
     courses.map(
       (course,index) => {
@@ -3819,7 +3918,8 @@ function buildStudentAnalytics() {
 
             const key =
               analyticsStudentKey(
-                student
+                student,
+                nameToMobiles
               );
 
             if (!unique.has(key)) {
@@ -4218,7 +4318,7 @@ function renderStudentAnalytics() {
           تحلیل مشتریان و دانشجویان
         </h3>
         <p>
-          هر دانشجو با شماره موبایل شناسایی می‌شود؛ در نبود موبایل، نام برای تطبیق استفاده می‌شود.
+          تطبیق دانشجو با شماره موبایل انجام می‌شود؛ رکوردهای قدیمی بدون موبایل، فقط وقتی نامشان دقیقاً به یک موبایل یکتا برسد با همان دانشجو ادغام می‌شوند.
         </p>
       </div>
 
