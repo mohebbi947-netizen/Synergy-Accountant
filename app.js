@@ -465,7 +465,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V27-JALALI-DEVICE-INDEPENDENT";
+  "V28-JALALI-MOBILE-DAY-FIX";
 
 document.documentElement
   .dataset
@@ -1052,7 +1052,7 @@ function openJalaliPicker(
           type="button"
           class="
             jalali-day
-            ${isToday ? "today" : ""}
+            ${isToday ? "jalali-today" : ""}
             ${isSelected ? "selected" : ""}
           "
           data-jy="${viewYear}"
