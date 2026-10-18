@@ -464,6 +464,20 @@ const JALALI_MONTHS = [
   "اسفند"
 ];
 
+const APP_BUILD =
+  "V27-JALALI-DEVICE-INDEPENDENT";
+
+document.documentElement
+  .dataset
+  .synergyBuild =
+    APP_BUILD;
+
+console.info(
+  "Synergy build:",
+  APP_BUILD
+);
+
+
 const JALALI_WEEKDAYS = [
   "ش",
   "ی",
@@ -577,6 +591,32 @@ function jalaliDate(v) {
     return String(v);
   }
 }
+
+function jalaliSaturdayFirstIndex(
+  jy,
+  jm,
+  jd
+) {
+
+  const g =
+    toGregorian(
+      jy,
+      jm,
+      jd
+    );
+
+  return mod(
+    g2d(
+      g.gy,
+      g.gm,
+      g.gd
+    ) -
+    5 +
+    7,
+    7
+  );
+}
+
 
 function persianWeekdayFromGregorian(
   gy,
@@ -787,12 +827,14 @@ function openJalaliPicker(
 
       <div
         class="jalali-weekdays"
+        dir="ltr"
+        style="direction:ltr"
       >
         ${
           JALALI_WEEKDAYS
             .map(
               d =>
-                `<span>${d}</span>`
+                `<span dir="rtl">${d}</span>`
             )
             .join("")
         }
@@ -802,6 +844,8 @@ function openJalaliPicker(
       <div
         id="jalaliCalendarGrid"
         class="jalali-calendar-grid"
+        dir="ltr"
+        style="direction:ltr"
       ></div>
 
 
@@ -950,30 +994,11 @@ function openJalaliPicker(
       .textContent =
         `امروز: ${todayJ.jy}/${pad2(todayJ.jm)}/${pad2(todayJ.jd)}`;
 
-    const firstG =
-      toGregorian(
+    const offset =
+      jalaliSaturdayFirstIndex(
         viewYear,
         viewMonth,
         1
-      );
-
-    /*
-      Calendar starts on Saturday.
-      g2d modulo mapping:
-      Mon=0 Tue=1 Wed=2 Thu=3 Fri=4 Sat=5 Sun=6.
-      Convert that to:
-      Sat=0 Sun=1 Mon=2 Tue=3 Wed=4 Thu=5 Fri=6.
-    */
-    const offset =
-      mod(
-        g2d(
-          firstG.gy,
-          firstG.gm,
-          firstG.gd
-        ) -
-        5 +
-        7,
-        7
       );
 
     const days =
@@ -1015,6 +1040,13 @@ function openJalaliPicker(
         day ===
           current.jd;
 
+      const weekdayIndex =
+        jalaliSaturdayFirstIndex(
+          viewYear,
+          viewMonth,
+          day
+        );
+
       html += `
         <button
           type="button"
@@ -1026,6 +1058,16 @@ function openJalaliPicker(
           data-jy="${viewYear}"
           data-jm="${viewMonth}"
           data-jd="${day}"
+          data-weekday-index="${weekdayIndex}"
+          aria-label="${
+            JALALI_WEEKDAYS[
+              weekdayIndex
+            ]
+          } ${day} ${
+            JALALI_MONTHS[
+              viewMonth - 1
+            ]
+          } ${viewYear}"
         >
           ${day}
         </button>
