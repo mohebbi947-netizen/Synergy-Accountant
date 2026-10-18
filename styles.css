@@ -3170,7 +3170,7 @@ body{
   background:rgba(255,255,255,.15);
 }
 
-.jalali-day.today{
+.jalali-day.jalali-today{
   box-shadow:
     inset 0 0 0 1px
     var(--theme-accent,#74efe7);
@@ -3570,3 +3570,211 @@ body{
   }
 }
 
+
+
+/* =========================================================
+   V13.6 — MOBILE JALALI PICKER HARDENING
+   Scoped ONLY to the Jalali date picker.
+========================================================= */
+
+@media(max-width:500px){
+
+  .jalali-picker-overlay{
+    box-sizing:border-box !important;
+    position:fixed !important;
+    inset:0 !important;
+    z-index:99999 !important;
+
+    width:100vw !important;
+    height:100dvh !important;
+    min-height:100vh !important;
+
+    padding:
+      max(10px, env(safe-area-inset-top))
+      10px
+      max(10px, env(safe-area-inset-bottom)) !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    overflow:auto !important;
+    overscroll-behavior:contain !important;
+    -webkit-overflow-scrolling:touch !important;
+
+    background:rgba(13,12,31,.78) !important;
+  }
+
+  .jalali-picker{
+    box-sizing:border-box !important;
+
+    width:100% !important;
+    max-width:430px !important;
+    max-height:
+      calc(
+        100dvh
+        - max(20px, env(safe-area-inset-top))
+        - max(20px, env(safe-area-inset-bottom))
+      ) !important;
+
+    margin:auto !important;
+    padding:14px 12px !important;
+
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+    overscroll-behavior:contain !important;
+    -webkit-overflow-scrolling:touch !important;
+
+    border-radius:24px !important;
+  }
+
+  .jalali-picker-head{
+    grid-template-columns:46px minmax(0,1fr) 46px !important;
+    gap:6px !important;
+    margin-bottom:8px !important;
+  }
+
+  .jalali-picker-head > button{
+    width:46px !important;
+    height:46px !important;
+    min-width:46px !important;
+    min-height:46px !important;
+    padding:0 !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    touch-action:manipulation !important;
+    -webkit-tap-highlight-color:transparent !important;
+  }
+
+  .jalali-picker-head > div{
+    min-width:0 !important;
+  }
+
+  .jalali-picker-head strong{
+    font-size:15px !important;
+    white-space:nowrap !important;
+  }
+
+  .jalali-picker-head small{
+    font-size:9px !important;
+    white-space:nowrap !important;
+  }
+
+  .jalali-weekdays,
+  .jalali-calendar-grid{
+    width:100% !important;
+    grid-template-columns:repeat(7,minmax(0,1fr)) !important;
+    gap:3px !important;
+    direction:rtl !important;
+  }
+
+  .jalali-weekdays span{
+    min-width:0 !important;
+    padding:5px 0 !important;
+    font-size:9px !important;
+    text-align:center !important;
+  }
+
+  .jalali-empty,
+  .jalali-day{
+    box-sizing:border-box !important;
+    width:100% !important;
+    min-width:0 !important;
+    min-height:43px !important;
+  }
+
+  .jalali-day{
+    padding:0 !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    font-size:12px !important;
+    line-height:1 !important;
+
+    touch-action:manipulation !important;
+    -webkit-tap-highlight-color:transparent !important;
+    user-select:none !important;
+    -webkit-user-select:none !important;
+  }
+
+  .jalali-picker-footer{
+    position:sticky !important;
+    bottom:0 !important;
+
+    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+    gap:6px !important;
+
+    margin-top:10px !important;
+    padding-top:8px !important;
+    padding-bottom:
+      max(2px, env(safe-area-inset-bottom)) !important;
+
+    background:
+      linear-gradient(
+        180deg,
+        rgba(61,51,89,0),
+        rgba(61,51,89,.98) 28%
+      ) !important;
+  }
+
+  .jalali-picker-footer button{
+    min-width:0 !important;
+    min-height:44px !important;
+    padding:8px 4px !important;
+    font-size:10px !important;
+
+    touch-action:manipulation !important;
+    -webkit-tap-highlight-color:transparent !important;
+  }
+
+  .jalali-time-field{
+    margin-top:9px !important;
+    padding:9px 10px !important;
+  }
+
+  .jalali-time-field input{
+    min-height:42px !important;
+    font-size:16px !important;
+  }
+
+  .jalali-input-wrap input[data-jalali-display="true"]{
+    font-size:16px !important;
+    min-height:46px !important;
+  }
+
+  .jalali-calendar-button{
+    min-width:46px !important;
+    min-height:46px !important;
+    touch-action:manipulation !important;
+    -webkit-tap-highlight-color:transparent !important;
+  }
+}
+
+
+
+/* =========================================================
+   V13.7 — JALALI TODAY CLASS COLLISION FIX
+   Root cause on mobile:
+   generic `.today { display:none; }` hid today's calendar cell.
+   Calendar now uses `.jalali-today` instead.
+========================================================= */
+
+.jalali-day.jalali-today{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+
+  box-shadow:
+    inset 0 0 0 1px
+    var(--theme-accent,#74efe7) !important;
+}
+
+@media(max-width:900px){
+  .jalali-calendar-grid .jalali-day.jalali-today{
+    display:flex !important;
+  }
+}
