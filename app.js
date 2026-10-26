@@ -466,7 +466,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V29-LOSSES-REALIZED-PROFIT-PETTY-DELETE";
+  "V30-EXPENSE-ANALYTICS";
 
 document.documentElement
   .dataset
@@ -7036,6 +7036,344 @@ function realizedFinanceSnapshot() {
   };
 }
 
+function buildExpenseAnalytics() {
+
+  const realized =
+    realizedFinanceSnapshot();
+
+  const directExpenses =
+    realized.realizedExpenses ||
+    [];
+
+  const consumptions =
+    realized.realizedConsumptions ||
+    [];
+
+  const losses =
+    state.inventoryLosses ||
+    [];
+
+
+  const categoryMap =
+    new Map();
+
+
+  function addCategory(
+    name,
+    amount,
+    count = 1,
+    type = "direct"
+  ) {
+
+    const key =
+      String(
+        name ||
+        "سایر"
+      ).trim() ||
+      "سایر";
+
+    if (
+      !categoryMap.has(
+        key
+      )
+    ) {
+      categoryMap.set(
+        key,
+        {
+          name:key,
+          amount:0,
+          count:0,
+          types:new Set()
+        }
+      );
+    }
+
+    const item =
+      categoryMap.get(
+        key
+      );
+
+    item.amount +=
+      Number(
+        amount || 0
+      );
+
+    item.count +=
+      Number(
+        count || 0
+      );
+
+    item.types.add(
+      type
+    );
+  }
+
+
+  /*
+    Direct/general expenses already have a user-selected category.
+  */
+  directExpenses.forEach(
+    expense => {
+
+      addCategory(
+        expense.category ||
+        "سایر",
+        expense.amount,
+        1,
+        "direct"
+      );
+    }
+  );
+
+
+  /*
+    Inventory becomes an expense only when actually consumed.
+    Keep it separate from purchase spend.
+  */
+  consumptions.forEach(
+    item => {
+
+      addCategory(
+        "مصرف کالا و مواد",
+        item.total_cost,
+        1,
+        "inventory"
+      );
+    }
+  );
+
+
+  /*
+    Losses/waste are recognized immediately as academy loss.
+  */
+  losses.forEach(
+    item => {
+
+      addCategory(
+        "ضایعات و تلفات",
+        item.total_cost,
+        1,
+        "loss"
+      );
+    }
+  );
+
+
+  const total =
+    realized.expense;
+
+
+  const categories =
+    [...categoryMap.values()]
+      .map(
+        item => ({
+          ...item,
+          types:
+            [...item.types],
+          share:
+            total
+              ? Math.round(
+                  (
+                    item.amount /
+                    total
+                  ) *
+                  100
+                )
+              : 0
+        })
+      )
+      .sort(
+        (a,b) =>
+          b.amount -
+          a.amount
+      );
+
+
+  const directTotal =
+    realized.serviceExpense;
+
+  const inventoryTotal =
+    realized.inventoryCost;
+
+  const lossTotal =
+    realized.lossCost;
+
+
+  const generalExpenses =
+    directExpenses.filter(
+      e =>
+        !e.course_id
+    );
+
+  const courseDirectExpenses =
+    directExpenses.filter(
+      e =>
+        !!e.course_id
+    );
+
+
+  const generalTotal =
+    sumAmount(
+      generalExpenses
+    ) +
+    lossTotal;
+
+
+  const courseDirectTotal =
+    sumAmount(
+      courseDirectExpenses
+    );
+
+
+  const paymentSource = {
+    direct:
+      directExpenses
+        .filter(
+          e =>
+            String(
+              e.payment_source ||
+              "direct"
+            ) !==
+            "petty_cash"
+        )
+        .reduce(
+          (sum,e) =>
+            sum +
+            Number(
+              e.amount || 0
+            ),
+          0
+        ),
+
+    petty:
+      directExpenses
+        .filter(
+          e =>
+            String(
+              e.payment_source ||
+              ""
+            ) ===
+            "petty_cash"
+        )
+        .reduce(
+          (sum,e) =>
+            sum +
+            Number(
+              e.amount || 0
+            ),
+          0
+        )
+  };
+
+
+  const completedCourseRows =
+    state.courses
+      .filter(
+        isCourseCompleted
+      )
+      .map(
+        course => {
+
+          const direct =
+            directExpenses
+              .filter(
+                e =>
+                  String(
+                    e.course_id ||
+                    ""
+                  ) ===
+                  String(
+                    course.course_id
+                  )
+              )
+              .reduce(
+                (sum,e) =>
+                  sum +
+                  Number(
+                    e.amount || 0
+                  ),
+                0
+              );
+
+
+          const inventory =
+            consumptions
+              .filter(
+                c =>
+                  String(
+                    c.course_id ||
+                    ""
+                  ) ===
+                  String(
+                    course.course_id
+                  )
+              )
+              .reduce(
+                (sum,c) =>
+                  sum +
+                  Number(
+                    c.total_cost || 0
+                  ),
+                0
+              );
+
+
+          return {
+            course,
+            direct,
+            inventory,
+            total:
+              direct +
+              inventory
+          };
+        }
+      )
+      .sort(
+        (a,b) =>
+          b.total -
+          a.total
+      );
+
+
+  const topCategory =
+    categories[0] ||
+    null;
+
+  const topCourse =
+    completedCourseRows[0] ||
+    null;
+
+
+  const directRecordCount =
+    directExpenses.length;
+
+  const avgDirectExpense =
+    directRecordCount
+      ? Math.round(
+          directTotal /
+          directRecordCount
+        )
+      : 0;
+
+
+  return {
+    total,
+    directTotal,
+    inventoryTotal,
+    lossTotal,
+    generalTotal,
+    courseDirectTotal,
+    categories,
+    paymentSource,
+    completedCourseRows,
+    topCategory,
+    topCourse,
+    directRecordCount,
+    avgDirectExpense
+  };
+}
+
+
 function financeCourseRows() {
 
   return state.courses
@@ -7346,6 +7684,9 @@ function renderFinance() {
   const avgTicket = payments.length ? Math.round(revenue/payments.length) : 0;
   const maxProfit = Math.max(1,...completedRows.map(x=>Math.max(0,Number(x.profit||0))));
 
+  const expenseAnalytics =
+    buildExpenseAnalytics();
+
   $("#content").innerHTML = `
 
     <section class="hero">
@@ -7418,6 +7759,716 @@ function renderFinance() {
 
     </div>
 
+
+
+    <section
+      class="panel"
+      style="margin-top:14px"
+    >
+
+      <div class="panel-head">
+
+        <div>
+          <h3>
+            تحلیل ساختار هزینه‌ها
+          </h3>
+
+          <p>
+            فقط هزینه‌های محقق‌شده؛ خرید انبار تا قبل از مصرف هزینه محسوب نمی‌شود.
+          </p>
+        </div>
+
+        <span class="count">
+          ${faNum(
+            expenseAnalytics
+              .categories
+              .length
+          )}
+        </span>
+
+      </div>
+
+
+      <div
+        class="kpi-grid"
+        style="margin-top:10px"
+      >
+
+        <div class="kpi danger">
+          <span>
+            کل هزینه محقق‌شده
+          </span>
+
+          <strong>
+            ${money(
+              expenseAnalytics.total
+            )}
+          </strong>
+
+          <small>
+            مبنای محاسبه سود خالص
+          </small>
+        </div>
+
+
+        <div class="kpi">
+          <span>
+            هزینه مستقیم ثبت‌شده
+          </span>
+
+          <strong>
+            ${money(
+              expenseAnalytics
+                .directTotal
+            )}
+          </strong>
+
+          <small>
+            مدرس، دانشگاه، تبلیغات و...
+          </small>
+        </div>
+
+
+        <div class="kpi">
+          <span>
+            مصرف کالا و مواد
+          </span>
+
+          <strong>
+            ${money(
+              expenseAnalytics
+                .inventoryTotal
+            )}
+          </strong>
+
+          <small>
+            فقط کالای مصرف‌شده در دوره‌های برگزارشده
+          </small>
+        </div>
+
+
+        <div class="kpi warning">
+          <span>
+            ضایعات و تلفات
+          </span>
+
+          <strong>
+            ${money(
+              expenseAnalytics
+                .lossTotal
+            )}
+          </strong>
+
+          <small>
+            سرقت، مفقودی، خرابی و ضایعات
+          </small>
+        </div>
+
+      </div>
+
+
+      <div
+        class="two-col"
+        style="margin-top:14px"
+      >
+
+        <div
+          style="
+            min-width:0;
+          "
+        >
+
+          <div
+            style="
+              display:flex;
+              justify-content:space-between;
+              align-items:center;
+              gap:10px;
+              margin-bottom:10px;
+            "
+          >
+            <div>
+              <b>
+                هزینه به تفکیک گروه
+              </b>
+
+              <span
+                style="
+                  display:block;
+                  opacity:.58;
+                  font-size:9px;
+                  margin-top:3px;
+                "
+              >
+                مرتب‌شده از بیشترین هزینه
+              </span>
+            </div>
+
+            ${
+              expenseAnalytics
+                .topCategory
+                ? `
+                  <span
+                    class="badge pink"
+                  >
+                    بیشترین:
+                    ${esc(
+                      expenseAnalytics
+                        .topCategory
+                        .name
+                    )}
+                  </span>
+                `
+                : ""
+            }
+          </div>
+
+
+          ${
+            expenseAnalytics
+              .categories
+              .length
+              ? `
+                <div
+                  class="lead-list"
+                >
+
+                  ${
+                    expenseAnalytics
+                      .categories
+                      .map(
+                        item => `
+                          <div
+                            class="lead-row"
+                            style="
+                              cursor:default;
+                              align-items:center;
+                            "
+                          >
+
+                            <div
+                              class="avatar"
+                            >
+                              ${faNum(
+                                item.share
+                              )}٪
+                            </div>
+
+
+                            <div
+                              class="lead-main"
+                            >
+
+                              <b>
+                                ${esc(
+                                  item.name
+                                )}
+                              </b>
+
+                              <span>
+                                ${faNum(
+                                  item.count
+                                )}
+                                رکورد
+                              </span>
+
+
+                              <div
+                                style="
+                                  height:6px;
+                                  margin-top:7px;
+                                  border-radius:999px;
+                                  background:
+                                    rgba(
+                                      255,
+                                      255,
+                                      255,
+                                      .08
+                                    );
+                                  overflow:hidden;
+                                "
+                              >
+
+                                <i
+                                  style="
+                                    display:block;
+                                    height:100%;
+                                    width:${
+                                      Math.min(
+                                        100,
+                                        item.share
+                                      )
+                                    }%;
+                                    border-radius:inherit;
+                                    background:
+                                      linear-gradient(
+                                        90deg,
+                                        var(--theme-primary),
+                                        var(--theme-secondary)
+                                      );
+                                  "
+                                ></i>
+
+                              </div>
+
+                            </div>
+
+
+                            <div
+                              class="lead-end"
+                              style="
+                                min-width:120px;
+                              "
+                            >
+
+                              <b>
+                                ${money(
+                                  item.amount
+                                )}
+                              </b>
+
+                              <small>
+                                ${faNum(
+                                  item.share
+                                )}٪
+                                از کل هزینه
+                              </small>
+
+                            </div>
+
+                          </div>
+                        `
+                      )
+                      .join("")
+                  }
+
+                </div>
+              `
+              : `
+                <div class="empty">
+                  <b>
+                    هنوز هزینه‌ای ثبت نشده
+                  </b>
+                </div>
+              `
+          }
+
+        </div>
+
+
+        <div
+          style="
+            min-width:0;
+          "
+        >
+
+          <div
+            style="
+              margin-bottom:10px;
+            "
+          >
+            <b>
+              ترکیب هزینه
+            </b>
+
+            <span
+              style="
+                display:block;
+                opacity:.58;
+                font-size:9px;
+                margin-top:3px;
+              "
+            >
+              تفکیک هزینه مستقیم، مصرف انبار و تلفات
+            </span>
+          </div>
+
+
+          <div
+            class="finance-strip"
+            style="
+              grid-template-columns:1fr;
+            "
+          >
+
+            <div>
+              <span>
+                هزینه مستقیم
+              </span>
+
+              <strong>
+                ${money(
+                  expenseAnalytics
+                    .directTotal
+                )}
+              </strong>
+
+              <small>
+                ${
+                  expenseAnalytics.total
+                    ? faNum(
+                        Math.round(
+                          expenseAnalytics
+                            .directTotal /
+                          expenseAnalytics
+                            .total *
+                          100
+                        )
+                      )
+                    : "۰"
+                }٪
+                از کل
+              </small>
+            </div>
+
+
+            <div>
+              <span>
+                مصرف انبار
+              </span>
+
+              <strong>
+                ${money(
+                  expenseAnalytics
+                    .inventoryTotal
+                )}
+              </strong>
+
+              <small>
+                ${
+                  expenseAnalytics.total
+                    ? faNum(
+                        Math.round(
+                          expenseAnalytics
+                            .inventoryTotal /
+                          expenseAnalytics
+                            .total *
+                          100
+                        )
+                      )
+                    : "۰"
+                }٪
+                از کل
+              </small>
+            </div>
+
+
+            <div>
+              <span>
+                ضایعات و تلفات
+              </span>
+
+              <strong>
+                ${money(
+                  expenseAnalytics
+                    .lossTotal
+                )}
+              </strong>
+
+              <small>
+                ${
+                  expenseAnalytics.total
+                    ? faNum(
+                        Math.round(
+                          expenseAnalytics
+                            .lossTotal /
+                          expenseAnalytics
+                            .total *
+                          100
+                        )
+                      )
+                    : "۰"
+                }٪
+                از کل
+              </small>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <div
+        class="two-col"
+        style="margin-top:14px"
+      >
+
+        <div
+          class="panel"
+          style="
+            margin:0;
+            padding:14px;
+          "
+        >
+
+          <div
+            class="panel-head"
+          >
+            <div>
+              <h3>
+                هزینه به تفکیک دوره
+              </h3>
+
+              <p>
+                فقط دوره‌های برگزارشده
+              </p>
+            </div>
+
+            <span class="count">
+              ${faNum(
+                expenseAnalytics
+                  .completedCourseRows
+                  .length
+              )}
+            </span>
+          </div>
+
+
+          ${
+            expenseAnalytics
+              .completedCourseRows
+              .length
+              ? `
+                <div
+                  class="lead-list"
+                >
+
+                  ${
+                    expenseAnalytics
+                      .completedCourseRows
+                      .map(
+                        row => `
+                          <div
+                            class="lead-row"
+                            style="
+                              cursor:default;
+                            "
+                          >
+
+                            <div
+                              class="avatar"
+                            >
+                              ◈
+                            </div>
+
+
+                            <div
+                              class="lead-main"
+                            >
+
+                              <b>
+                                ${esc(
+                                  row.course
+                                    .course_name ||
+                                  "دوره"
+                                )}
+                              </b>
+
+                              <span>
+                                هزینه مستقیم:
+                                ${money(
+                                  row.direct
+                                )}
+                                ·
+                                مصرف انبار:
+                                ${money(
+                                  row.inventory
+                                )}
+                              </span>
+
+                            </div>
+
+
+                            <div
+                              class="lead-end"
+                            >
+                              <b>
+                                ${money(
+                                  row.total
+                                )}
+                              </b>
+
+                              <small>
+                                کل هزینه دوره
+                              </small>
+                            </div>
+
+                          </div>
+                        `
+                      )
+                      .join("")
+                  }
+
+                </div>
+              `
+              : `
+                <div class="empty">
+                  <b>
+                    دوره برگزارشده‌ای وجود ندارد
+                  </b>
+                </div>
+              `
+          }
+
+        </div>
+
+
+        <div
+          class="panel"
+          style="
+            margin:0;
+            padding:14px;
+          "
+        >
+
+          <div
+            class="panel-head"
+          >
+            <div>
+              <h3>
+                کنترل هزینه عمومی
+              </h3>
+
+              <p>
+                هزینه‌های خارج از دوره و نحوه پرداخت
+              </p>
+            </div>
+          </div>
+
+
+          <div
+            class="finance-strip"
+            style="
+              grid-template-columns:
+                repeat(2,1fr);
+            "
+          >
+
+            <div>
+              <span>
+                هزینه عمومی + تلفات
+              </span>
+
+              <strong>
+                ${money(
+                  expenseAnalytics
+                    .generalTotal
+                )}
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                میانگین هر هزینه مستقیم
+              </span>
+
+              <strong>
+                ${money(
+                  expenseAnalytics
+                    .avgDirectExpense
+                )}
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                پرداخت مستقیم
+              </span>
+
+              <strong>
+                ${money(
+                  expenseAnalytics
+                    .paymentSource
+                    .direct
+                )}
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                پرداخت از تنخواه
+              </span>
+
+              <strong>
+                ${money(
+                  expenseAnalytics
+                    .paymentSource
+                    .petty
+                )}
+              </strong>
+            </div>
+
+          </div>
+
+
+          ${
+            expenseAnalytics
+              .topCourse
+              ? `
+                <div
+                  style="
+                    margin-top:12px;
+                    padding:12px;
+                    border-radius:16px;
+                    background:
+                      rgba(
+                        255,
+                        255,
+                        255,
+                        .05
+                      );
+                    line-height:1.9;
+                  "
+                >
+
+                  <span
+                    style="
+                      display:block;
+                      opacity:.58;
+                      font-size:9px;
+                    "
+                  >
+                    پرهزینه‌ترین دوره برگزارشده
+                  </span>
+
+                  <b>
+                    ${esc(
+                      expenseAnalytics
+                        .topCourse
+                        .course
+                        .course_name ||
+                      "دوره"
+                    )}
+                  </b>
+
+                  <strong
+                    style="
+                      display:block;
+                      margin-top:3px;
+                    "
+                  >
+                    ${money(
+                      expenseAnalytics
+                        .topCourse
+                        .total
+                    )}
+                  </strong>
+
+                </div>
+              `
+              : ""
+          }
+
+        </div>
+
+      </div>
+
+    </section>
 
 
     <section class="panel" style="margin-top:14px">
