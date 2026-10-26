@@ -466,7 +466,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V30-EXPENSE-ANALYTICS";
+  "V30.1-EXPENSE-DETAIL-MODAL";
 
 document.documentElement
   .dataset
@@ -7062,7 +7062,8 @@ function buildExpenseAnalytics() {
     name,
     amount,
     count = 1,
-    type = "direct"
+    type = "direct",
+    detail = null
   ) {
 
     const key =
@@ -7083,7 +7084,8 @@ function buildExpenseAnalytics() {
           name:key,
           amount:0,
           count:0,
-          types:new Set()
+          types:new Set(),
+          details:[]
         }
       );
     }
@@ -7106,6 +7108,12 @@ function buildExpenseAnalytics() {
     item.types.add(
       type
     );
+
+    if (detail) {
+      item.details.push(
+        detail
+      );
+    }
   }
 
 
@@ -7120,7 +7128,40 @@ function buildExpenseAnalytics() {
         "سایر",
         expense.amount,
         1,
-        "direct"
+        "direct",
+        {
+          type:"direct",
+          id:
+            expense.expense_id ||
+            "",
+          title:
+            expense.description ||
+            expense.category ||
+            "هزینه",
+          amount:
+            Number(
+              expense.amount || 0
+            ),
+          date:
+            expense.expense_date ||
+            expense.created_at ||
+            "",
+          course_id:
+            expense.course_id ||
+            "",
+          vendor:
+            expense.vendor ||
+            "",
+          payment_source:
+            expense.payment_source ||
+            "direct",
+          category:
+            expense.category ||
+            "سایر",
+          notes:
+            expense.notes ||
+            ""
+        }
       );
     }
   );
@@ -7137,7 +7178,36 @@ function buildExpenseAnalytics() {
         "مصرف کالا و مواد",
         item.total_cost,
         1,
-        "inventory"
+        "inventory",
+        {
+          type:"inventory",
+          id:
+            item.consumption_id ||
+            "",
+          title:
+            item.product_name ||
+            "مصرف کالا",
+          amount:
+            Number(
+              item.total_cost || 0
+            ),
+          date:
+            item.consumption_date ||
+            item.created_at ||
+            "",
+          course_id:
+            item.course_id ||
+            "",
+          quantity:
+            item.quantity || 0,
+          unit:
+            item.unit || "",
+          unit_cost:
+            item.unit_cost || 0,
+          notes:
+            item.notes ||
+            ""
+        }
       );
     }
   );
@@ -7153,7 +7223,34 @@ function buildExpenseAnalytics() {
         "ضایعات و تلفات",
         item.total_cost,
         1,
-        "loss"
+        "loss",
+        {
+          type:"loss",
+          id:
+            item.loss_id ||
+            "",
+          title:
+            item.product_name ||
+            "ضایعات / تلفات",
+          amount:
+            Number(
+              item.total_cost || 0
+            ),
+          date:
+            item.loss_date ||
+            item.created_at ||
+            "",
+          reason:
+            item.reason ||
+            "تلفات",
+          quantity:
+            item.quantity || 0,
+          unit:
+            item.unit || "",
+          notes:
+            item.notes ||
+            ""
+        }
       );
     }
   );
@@ -7662,6 +7759,467 @@ function returnPettyCash() {
 }
 
 
+function openExpenseCategoryDetails(
+  categoryName,
+  analytics
+) {
+
+  const category =
+    analytics.categories.find(
+      item =>
+        String(
+          item.name
+        ) ===
+        String(
+          categoryName
+        )
+    );
+
+  if (!category) return;
+
+
+  const details =
+    category.details || [];
+
+
+  modal(`
+
+    <div class="modal-title">
+
+      <span>
+        EXPENSE DETAILS
+      </span>
+
+      <h2>
+        ${esc(
+          category.name
+        )}
+      </h2>
+
+      <p>
+        ${faNum(
+          details.length
+        )}
+        رکورد
+        ·
+        مجموع
+        ${money(
+          category.amount
+        )}
+        ·
+        ${faNum(
+          category.share
+        )}٪
+        از کل هزینه محقق‌شده
+      </p>
+
+    </div>
+
+
+    <div
+      class="kpi-grid"
+      style="
+        margin-top:0;
+        margin-bottom:14px;
+      "
+    >
+
+      <div class="kpi danger">
+        <span>
+          مجموع گروه
+        </span>
+        <strong>
+          ${money(
+            category.amount
+          )}
+        </strong>
+        <small>
+          ${faNum(
+            category.share
+          )}٪
+          از کل هزینه
+        </small>
+      </div>
+
+
+      <div class="kpi">
+        <span>
+          تعداد رکورد
+        </span>
+        <strong>
+          ${faNum(
+            details.length
+          )}
+        </strong>
+        <small>
+          ثبت‌شده در این گروه
+        </small>
+      </div>
+
+
+      <div class="kpi">
+        <span>
+          میانگین هر رکورد
+        </span>
+        <strong>
+          ${money(
+            details.length
+              ? Math.round(
+                  category.amount /
+                  details.length
+                )
+              : 0
+          )}
+        </strong>
+        <small>
+          Average
+        </small>
+      </div>
+
+    </div>
+
+
+    ${
+      details.length
+        ? `
+          <div
+            class="lead-list"
+            style="
+              max-height:
+                min(
+                  62vh,
+                  650px
+                );
+              overflow:auto;
+              padding-left:2px;
+            "
+          >
+
+            ${
+              details
+                .slice()
+                .sort(
+                  (a,b) =>
+                    String(
+                      b.date || ""
+                    ).localeCompare(
+                      String(
+                        a.date || ""
+                      )
+                    )
+                )
+                .map(
+                  detail => {
+
+                    const course =
+                      detail.course_id
+                        ? state.courses.find(
+                            c =>
+                              String(
+                                c.course_id
+                              ) ===
+                              String(
+                                detail.course_id
+                              )
+                          )
+                        : null;
+
+
+                    if (
+                      detail.type ===
+                      "inventory"
+                    ) {
+
+                      return `
+                        <div
+                          class="lead-row"
+                          style="
+                            cursor:default;
+                            align-items:flex-start;
+                          "
+                        >
+
+                          <div class="avatar">
+                            ◫
+                          </div>
+
+
+                          <div class="lead-main">
+
+                            <b>
+                              ${esc(
+                                detail.title
+                              )}
+                            </b>
+
+                            <span>
+                              ${
+                                course
+                                  ? esc(
+                                      course.course_name
+                                    )
+                                  : "بدون دوره"
+                              }
+                            </span>
+
+                            <span>
+                              مقدار:
+                              ${faNum(
+                                detail.quantity
+                              )}
+                              ${esc(
+                                detail.unit || ""
+                              )}
+                              ·
+                              قیمت واحد:
+                              ${money(
+                                detail.unit_cost
+                              )}
+                            </span>
+
+                            ${
+                              detail.notes
+                                ? `
+                                  <span>
+                                    ${esc(
+                                      detail.notes
+                                    )}
+                                  </span>
+                                `
+                                : ""
+                            }
+
+                          </div>
+
+
+                          <div
+                            class="lead-end"
+                            style="
+                              min-width:120px;
+                            "
+                          >
+
+                            <b>
+                              ${money(
+                                detail.amount
+                              )}
+                            </b>
+
+                            <small>
+                              ${dateFa(
+                                detail.date
+                              )}
+                            </small>
+
+                          </div>
+
+                        </div>
+                      `;
+                    }
+
+
+                    if (
+                      detail.type ===
+                      "loss"
+                    ) {
+
+                      return `
+                        <div
+                          class="lead-row"
+                          style="
+                            cursor:default;
+                            align-items:flex-start;
+                          "
+                        >
+
+                          <div class="avatar">
+                            !
+                          </div>
+
+
+                          <div class="lead-main">
+
+                            <b>
+                              ${esc(
+                                detail.title
+                              )}
+                            </b>
+
+                            <span>
+                              علت:
+                              ${esc(
+                                detail.reason
+                              )}
+                            </span>
+
+                            <span>
+                              تعداد:
+                              ${faNum(
+                                detail.quantity
+                              )}
+                              ${esc(
+                                detail.unit || ""
+                              )}
+                            </span>
+
+                            ${
+                              detail.notes
+                                ? `
+                                  <span>
+                                    ${esc(
+                                      detail.notes
+                                    )}
+                                  </span>
+                                `
+                                : ""
+                            }
+
+                          </div>
+
+
+                          <div
+                            class="lead-end"
+                            style="
+                              min-width:120px;
+                            "
+                          >
+
+                            <b>
+                              ${money(
+                                detail.amount
+                              )}
+                            </b>
+
+                            <small>
+                              ${dateFa(
+                                detail.date
+                              )}
+                            </small>
+
+                          </div>
+
+                        </div>
+                      `;
+                    }
+
+
+                    return `
+                      <div
+                        class="lead-row"
+                        style="
+                          cursor:default;
+                          align-items:flex-start;
+                        "
+                      >
+
+                        <div class="avatar">
+                          ◈
+                        </div>
+
+
+                        <div class="lead-main">
+
+                          <b>
+                            ${esc(
+                              detail.title
+                            )}
+                          </b>
+
+                          <span>
+                            ${
+                              course
+                                ? esc(
+                                    course.course_name
+                                  )
+                                : "هزینه عمومی آکادمی"
+                            }
+                          </span>
+
+                          ${
+                            detail.vendor
+                              ? `
+                                <span>
+                                  دریافت‌کننده / فروشنده:
+                                  ${esc(
+                                    detail.vendor
+                                  )}
+                                </span>
+                              `
+                              : ""
+                          }
+
+                          <span>
+                            منبع پرداخت:
+                            ${
+                              String(
+                                detail.payment_source
+                              ) ===
+                              "petty_cash"
+                                ? "تنخواه مدیر"
+                                : "پرداخت مستقیم آکادمی"
+                            }
+                          </span>
+
+                          ${
+                            detail.notes
+                              ? `
+                                <span>
+                                  ${esc(
+                                    detail.notes
+                                  )}
+                                </span>
+                              `
+                              : ""
+                          }
+
+                        </div>
+
+
+                        <div
+                          class="lead-end"
+                          style="
+                            min-width:120px;
+                          "
+                        >
+
+                          <b>
+                            ${money(
+                              detail.amount
+                            )}
+                          </b>
+
+                          <small>
+                            ${dateFa(
+                              detail.date
+                            )}
+                          </small>
+
+                        </div>
+
+                      </div>
+                    `;
+                  }
+                )
+                .join("")
+            }
+
+          </div>
+        `
+        : `
+          <div class="empty">
+            <b>
+              رکوردی در این گروه وجود ندارد
+            </b>
+          </div>
+        `
+    }
+
+  `);
+}
+
+
+
+
 function renderFinance() {
   title("مالی و سودآوری","سود محقق‌شده فقط از دوره‌های برگزارشده محاسبه می‌شود");
   const realized = realizedFinanceSnapshot();
@@ -7938,11 +8496,17 @@ function renderFinance() {
                       .categories
                       .map(
                         item => `
-                          <div
+                          <button
+                            type="button"
                             class="lead-row"
+                            data-expense-category="${esc(
+                              item.name
+                            )}"
                             style="
-                              cursor:default;
+                              cursor:pointer;
                               align-items:center;
+                              width:100%;
+                              text-align:right;
                             "
                           >
 
@@ -8036,7 +8600,7 @@ function renderFinance() {
 
                             </div>
 
-                          </div>
+                          </button>
                         `
                       )
                       .join("")
@@ -9098,6 +9662,21 @@ function renderFinance() {
 
 
   bindActions();
+
+  $$("[data-expense-category]")
+    .forEach(
+      button => {
+
+        button.onclick =
+          () =>
+            openExpenseCategoryDetails(
+              button.dataset
+                .expenseCategory,
+              expenseAnalytics
+            );
+      }
+    );
+
 
   $$('[data-petty-delete]').forEach(button => {
     button.onclick = async () => {
