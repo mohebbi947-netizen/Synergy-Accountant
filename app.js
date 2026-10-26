@@ -21,6 +21,7 @@ const state = {
   purchaseCosts: [],
   consumptions: [],
   inventoryMovements: [],
+  inventoryLosses: [],
   pettyCashTransactions: [],
   selectedLead: null,
   selectedCourse: null,
@@ -465,7 +466,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V28-JALALI-MOBILE-DAY-FIX";
+  "V29-LOSSES-REALIZED-PROFIT-PETTY-DELETE";
 
 document.documentElement
   .dataset
@@ -1674,6 +1675,8 @@ function cacheableStateSnapshot() {
         state.consumptions || [],
       pettyCashTransactions:
         state.pettyCashTransactions || [],
+      inventoryLosses:
+        state.inventoryLosses || [],
 
       /*
         Inventory movements can become very large over time.
@@ -1774,6 +1777,8 @@ function saveStateCache() {
             state.consumptions || [],
           pettyCashTransactions:
             state.pettyCashTransactions || [],
+          inventoryLosses:
+            state.inventoryLosses || [],
           inventoryMovements:[]
         }
       };
@@ -1847,6 +1852,7 @@ function restoreStateCache() {
       ["purchaseCosts", []],
       ["consumptions", []],
       ["pettyCashTransactions", []],
+      ["inventoryLosses", []],
       ["inventoryMovements", []]
     ].forEach(
       ([key,fallback]) => {
@@ -2019,6 +2025,7 @@ async function loadAll(
         safeLoad("purchaseCosts", []),
         safeLoad("consumptions", []),
         safeLoad("inventoryMovements", []),
+        safeLoad("inventoryLosses", []),
         safeLoad("financeExtension", {
           transactions:[]
         })
@@ -2050,6 +2057,7 @@ async function loadAll(
       purchaseCosts,
       consumptions,
       inventoryMovements,
+      inventoryLosses,
       financeExtension
     ] = values;
 
@@ -2152,6 +2160,12 @@ async function loadAll(
       []
     );
 
+    assign(
+      inventoryLosses,
+      "inventoryLosses",
+      []
+    );
+
     if (
       financeExtension?.ok &&
       financeExtension.data
@@ -2205,6 +2219,11 @@ async function loadAll(
           state.inventoryMovements =
             bundle.data.inventoryMovements ||
             state.inventoryMovements ||
+            [];
+
+          state.inventoryLosses =
+            bundle.data.inventoryLosses ||
+            state.inventoryLosses ||
             [];
 
           anySuccess = true;
@@ -2642,7 +2661,7 @@ function renderToday() {
       </div>
 
       <div class="kpi success">
-        <span>درآمد وصول‌شده</span>
+        <span>درآمد دوره‌های برگزارشده</span>
         <strong>
           ${money(revenue)}
         </strong>
@@ -5884,7 +5903,7 @@ function openCourse(id) {
       </div>
 
       <div class="kpi ${m.profit >= 0 ? "success" : "danger"}">
-        <span>سود دوره</span>
+        <span>${isCourseCompleted(course) ? "سود دوره" : "سود موقت دوره"}</span>
         <strong>${money(m.profit)}</strong>
         <small>Margin ${faNum(margin)}٪</small>
       </div>
@@ -6303,6 +6322,14 @@ function openCourse(id) {
 
     </section>
 
+
+    <section class="panel" style="margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div><b>وضعیت محاسبه سود:</b><span style="display:block;margin-top:5px;opacity:.7">${isCourseCompleted(course) ? "این دوره برگزار شده و داخل سود خالص محاسبه می‌شود." : "این دوره هنوز جاری است و از سود خالص اصلی خارج است."}</span></div>
+        ${!isCourseCompleted(course) ? `<button id="completeCourseBtn" type="button" class="primary">✓ دوره برگزار شد</button>` : `<em class="badge green">برگزار شده</em>`}
+      </div>
+    </section>
+
     <div class="profile-actions" style="margin-top:14px">
 
       <button
@@ -6467,6 +6494,22 @@ function openCourse(id) {
       }
     );
 
+
+
+  const completeBtn = $('#completeCourseBtn');
+  if (completeBtn) {
+    completeBtn.onclick = async () => {
+      if(!confirm('این دوره به عنوان «برگزار شده» ثبت شود؟\n\nبعد از این کار درآمد و تمام هزینه‌های ثبت‌شده این دوره وارد سود خالص اصلی می‌شوند.')) return;
+      try {
+        completeBtn.disabled=true; completeBtn.textContent='در حال ثبت...';
+        const result=await post('updateCourse',{course_id:course.course_id,status:'completed'});
+        if(!result?.success) throw new Error(result?.message||'وضعیت دوره تغییر نکرد.');
+        const idx=state.courses.findIndex(c=>String(c.course_id)===String(course.course_id));
+        if(idx!==-1) state.courses[idx]={...state.courses[idx],status:'completed'};
+        course.status='completed'; saveStateCache(); toast('دوره برگزارشده ثبت شد و وارد گزارش سود شد'); openCourse(course.course_id);
+      } catch(error) { toast(error.message||'ثبت وضعیت دوره انجام نشد.',true); completeBtn.disabled=false; completeBtn.textContent='✓ دوره برگزار شد'; }
+    };
+  }
 
   const editBtn =
     $("#editCourseBtn");
@@ -6963,6 +7006,36 @@ function approvedPayments() {
   );
 }
 
+function isCourseCompleted(courseOrId) {
+  const course = typeof courseOrId === "object"
+    ? courseOrId
+    : state.courses.find(c => String(c.course_id) === String(courseOrId));
+  return !!course && String(course.status || "").toLowerCase() === "completed";
+}
+
+function realizedFinanceSnapshot() {
+  const completedIds = new Set(state.courses.filter(isCourseCompleted).map(c => String(c.course_id)));
+  const realizedPayments = approvedPayments().filter(p => !p.course_id || completedIds.has(String(p.course_id)));
+  const pendingPayments = approvedPayments().filter(p => p.course_id && !completedIds.has(String(p.course_id)));
+  const realizedExpenses = state.expenses.filter(e => !e.course_id || completedIds.has(String(e.course_id)));
+  const pendingExpenses = state.expenses.filter(e => e.course_id && !completedIds.has(String(e.course_id)));
+  const realizedConsumptions = state.consumptions.filter(c => completedIds.has(String(c.course_id)));
+  const pendingConsumptions = state.consumptions.filter(c => !completedIds.has(String(c.course_id)));
+  const lossCost = (state.inventoryLosses || []).reduce((s,x)=>s+Number(x.total_cost||0),0);
+  const revenue = sumAmount(realizedPayments);
+  const serviceExpense = sumAmount(realizedExpenses);
+  const inventoryCost = sumConsumptionCost(realizedConsumptions);
+  const expense = serviceExpense + inventoryCost + lossCost;
+  return {
+    completedIds, realizedPayments, pendingPayments, realizedExpenses, pendingExpenses,
+    realizedConsumptions, pendingConsumptions, lossCost, revenue, serviceExpense, inventoryCost,
+    expense, profit: revenue-expense,
+    pendingRevenue: sumAmount(pendingPayments),
+    pendingServiceExpense: sumAmount(pendingExpenses),
+    pendingInventoryCost: sumConsumptionCost(pendingConsumptions)
+  };
+}
+
 function financeCourseRows() {
 
   return state.courses
@@ -6980,7 +7053,8 @@ function financeCourseRows() {
       return {
         course,
         ...m,
-        margin
+        margin,
+        realized:isCourseCompleted(course)
       };
     })
     .sort(
@@ -7251,86 +7325,26 @@ function returnPettyCash() {
 
 
 function renderFinance() {
-
-  title(
-    "مالی و سودآوری",
-    "کنترل درآمد، هزینه، سود و عملکرد اقتصادی دوره‌ها"
-  );
-
-  const payments =
-    approvedPayments();
-
-  const revenue =
-    sumAmount(payments);
-
-  const generalExpense =
-    sumAmount(state.expenses);
-
-  const inventoryConsumedCost =
-    sumConsumptionCost(
-      state.consumptions
-    );
-
-  const expense =
-    generalExpense +
-    inventoryConsumedCost;
-
-  const purchaseSpend =
-    state.purchases.reduce(
-      (sum, p) =>
-        sum + Number(p.total_amount || 0),
-      0
-    );
-
-  const profit =
-    revenue - expense;
-
-  const petty =
-    pettyCashMetrics();
-
-  const distributableProfit =
-    profit -
-    petty.balance;
-
-  const margin =
-    revenue
-      ? Math.round(
-          (profit / revenue) * 100
-        )
-      : 0;
-
-  const rows =
-    financeCourseRows();
-
-  const profitable =
-    rows.filter(
-      x => x.profit > 0
-    ).length;
-
-  const lossMaking =
-    rows.filter(
-      x => x.profit < 0
-    ).length;
-
-  const avgTicket =
-    payments.length
-      ? Math.round(
-          revenue / payments.length
-        )
-      : 0;
-
-  const maxProfit =
-    Math.max(
-      1,
-      ...rows.map(
-        x =>
-          Math.max(
-            0,
-            Number(x.profit || 0)
-          )
-      )
-    );
-
+  title("مالی و سودآوری","سود محقق‌شده فقط از دوره‌های برگزارشده محاسبه می‌شود");
+  const realized = realizedFinanceSnapshot();
+  const payments = realized.realizedPayments;
+  const revenue = realized.revenue;
+  const generalExpense = realized.serviceExpense;
+  const inventoryConsumedCost = realized.inventoryCost;
+  const lossCost = realized.lossCost;
+  const expense = realized.expense;
+  const purchaseSpend = state.purchases.reduce((sum,p)=>sum+Number(p.total_amount||0),0);
+  const profit = realized.profit;
+  const petty = pettyCashMetrics();
+  const distributableProfit = profit - petty.balance;
+  const margin = revenue ? Math.round((profit/revenue)*100) : 0;
+  const rows = financeCourseRows();
+  const completedRows = rows.filter(x=>x.realized);
+  const pendingRows = rows.filter(x=>!x.realized);
+  const profitable = completedRows.filter(x=>x.profit>0).length;
+  const lossMaking = completedRows.filter(x=>x.profit<0).length;
+  const avgTicket = payments.length ? Math.round(revenue/payments.length) : 0;
+  const maxProfit = Math.max(1,...completedRows.map(x=>Math.max(0,Number(x.profit||0))));
 
   $("#content").innerHTML = `
 
@@ -7347,7 +7361,7 @@ function renderFinance() {
         </h1>
 
         <p>
-          سود خالص فعلی
+          سود خالص محقق‌شده
           <b>${money(profit)}</b>
           با حاشیه سود
           <b>${faNum(margin)}٪</b>
@@ -7377,16 +7391,17 @@ function renderFinance() {
       </div>
 
       <div class="kpi danger">
-        <span>کل هزینه‌ها</span>
+        <span>هزینه محقق‌شده</span>
         <strong>${money(expense)}</strong>
         <small>
-          ${faNum(state.expenses.length)}
-          رکورد هزینه
+          شامل هزینه دوره‌های برگزارشده، عمومی و
+          ${money(lossCost)}
+          ضایعات/تلفات
         </small>
       </div>
 
       <div class="kpi ${profit >= 0 ? "success" : "danger"}">
-        <span>سود خالص</span>
+        <span>سود خالص محقق‌شده</span>
         <strong>${money(profit)}</strong>
         <small>
           درآمد منهای هزینه
@@ -7403,6 +7418,21 @@ function renderFinance() {
 
     </div>
 
+
+
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <div><h3>دوره‌های جاری — خارج از سود خالص</h3><p>تا زمانی که دوره «برگزار شده» نشود، درآمد و هزینه‌های آن فقط اینجا نمایش داده می‌شود.</p></div>
+        <span class="count">${faNum(pendingRows.length)}</span>
+      </div>
+      <div class="finance-strip">
+        <div><span>دریافتی دوره‌های جاری</span><strong>${money(realized.pendingRevenue)}</strong></div>
+        <div><span>هزینه مستقیم جاری</span><strong>${money(realized.pendingServiceExpense)}</strong></div>
+        <div><span>مصرف انبار جاری</span><strong>${money(realized.pendingInventoryCost)}</strong></div>
+      </div>
+      ${pendingRows.length ? `<div class="lead-list" style="margin-top:12px">${pendingRows.slice(0,12).map(row=>`
+        <div class="lead-row" style="cursor:default"><div class="avatar">◷</div><div class="lead-main"><b>${esc(row.course.course_name||"دوره")}</b><span>${dateFa(row.course.start_date)} · هنوز وارد سود خالص نشده</span></div><div class="lead-end"><b>${money(row.revenue)} درآمد</b><small>${money(row.cost)} هزینه ثبت‌شده</small></div></div>`).join("")}</div>` : `<div class="empty"><b>همه دوره‌ها نهایی شده‌اند</b></div>`}
+    </section>
 
     <section
       class="panel petty-cash-section"
@@ -7561,6 +7591,7 @@ function renderFinance() {
                               tx.created_at
                             )}
                           </small>
+                          <button type="button" class="danger-action mini-edit-btn" data-petty-delete="${esc(tx.transaction_id)}" style="margin-top:5px">حذف</button>
                         </div>
                       </div>
                     `;
@@ -8017,6 +8048,25 @@ function renderFinance() {
 
   bindActions();
 
+  $$('[data-petty-delete]').forEach(button => {
+    button.onclick = async () => {
+      const tx = state.pettyCashTransactions.find(x=>String(x.transaction_id)===String(button.dataset.pettyDelete));
+      if (!tx) return;
+      const linked = tx.type === 'petty_expense' ? '\n\nهزینه حذف نمی‌شود؛ فقط منبع پرداخت آن مستقیم می‌شود.' : tx.type === 'petty_purchase' ? '\n\nفاکتور خرید حذف نمی‌شود؛ فقط منبع پرداخت آن مستقیم می‌شود.' : '';
+      if (!confirm(`تراکنش تنخواه به مبلغ ${money(tx.amount)} حذف شود؟${linked}`)) return;
+      try {
+        button.disabled=true; button.textContent='در حال حذف...';
+        const result=await post('deletePettyCashTransaction',{transaction_id:tx.transaction_id});
+        if(!result?.success) throw new Error(result?.message||'حذف تراکنش انجام نشد.');
+        toast(result.message||'تراکنش تنخواه حذف شد');
+        await loadAll(false);
+      } catch(error) {
+        toast(error.message||'حذف تراکنش انجام نشد.',true); button.disabled=false; button.textContent='حذف';
+      }
+    };
+  });
+
+
   $$("[data-expense-edit]")
     .forEach(button => {
       button.onclick = () => {
@@ -8432,10 +8482,15 @@ function inventoryTotals() {
     sumConsumptionCost(
       state.consumptions
     );
+
+  const lossValue =
+    (state.inventoryLosses || []).reduce((sum,item)=>sum+Number(item.total_cost||0),0);
+
 return {
     stockValue,
     purchaseValue,
-    consumedValue
+    consumedValue,
+    lossValue
   };
 }
 
@@ -8477,6 +8532,9 @@ async function refreshInventoryData() {
 
     state.inventoryMovements =
       bundle.data.inventoryMovements || [];
+
+    state.inventoryLosses =
+      bundle.data.inventoryLosses || [];
 
     return true;
 
@@ -8556,6 +8614,8 @@ function renderInventory() {
         <small>هزینه تخصیص‌یافته به دوره‌ها</small>
       </div>
 
+      <div class="kpi danger"><span>ضایعات و تلفات</span><strong>${money(t.lossValue)}</strong><small>سرقت، مفقودی، خرابی و ضایعات</small></div>
+
       <div class="kpi">
         <span>میانگین قیمت هر واحد</span>
         <strong>
@@ -8606,6 +8666,8 @@ function renderInventory() {
         >
           ثبت مصرف دوره
         </button>
+
+        <button class="secondary glass-button" data-action="newInventoryLoss">ثبت ضایعات / تلفات</button>
 
         <button
           class="primary"
@@ -9034,6 +9096,11 @@ return `
             `
         }
 
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><h3>ضایعات و تلفات انبار</h3><p>کالاهای سرقت‌شده، مفقود، خراب یا ضایع‌شده</p></div><span class="count">${faNum((state.inventoryLosses||[]).length)}</span></div>
+        ${(state.inventoryLosses||[]).length ? `<div class="lead-list">${state.inventoryLosses.slice().reverse().slice(0,15).map(item=>`<div class="lead-row" style="cursor:default"><div class="avatar">!</div><div class="lead-main"><b>${esc(item.product_name||"کالا")}</b><span>${esc(item.reason||"تلفات")} · ${faNum(item.quantity)} ${esc(item.unit||"")} · ${dateFa(item.loss_date||item.created_at)}</span>${item.notes?`<span>${esc(item.notes)}</span>`:""}</div><div class="lead-end"><b>${money(item.total_cost)}</b><small>زیان شناسایی‌شده</small></div></div>`).join("")}</div>` : `<div class="empty"><b>ضایعات یا تلفاتی ثبت نشده</b><span>سرقت، مفقودی، خرابی یا ضایعات را از دکمه بالا ثبت کنید.</span></div>`}
       </section>
 
     </div>
@@ -12072,6 +12139,26 @@ async function newPurchase() {
 
 
 
+function newInventoryLoss() {
+  if(!activeProducts().length){toast('کالایی برای ثبت تلفات وجود ندارد.',true);return;}
+  modal(`
+    <div class="modal-title"><span>INVENTORY LOSS</span><h2>ثبت ضایعات و تلفات</h2><p>سرقت، مفقودی، خرابی، شکستگی، انقضا یا هر خروج غیرعادی از موجودی. ارزش واقعی کالا با FIFO از موجودی کم و به عنوان زیان شناسایی می‌شود.</p></div>
+    <form id="inventoryLossForm" class="form-grid">
+      ${selectField('کالا','product_id',`<option value="">انتخاب کالا</option>${activeProducts().map(p=>`<option value="${esc(p.product_id)}">${esc(p.product_name)} — موجودی: ${faNum(inventoryProductStock(p.product_id))} ${esc(p.unit||'')}</option>`).join('')}`)}
+      ${formField('تاریخ','loss_date','date')}
+      ${selectField('علت','reason',`<option value="سرقت">سرقت</option><option value="مفقودی">مفقودی / گم‌شدن</option><option value="خرابی">خرابی / شکستگی</option><option value="ضایعات">ضایعات</option><option value="انقضا">انقضا</option><option value="سایر">سایر</option>`)}
+      ${formField('تعداد از دست رفته','quantity','number')}
+      <div id="inventoryLossStockHelp" class="field" style="justify-content:center;line-height:1.9;opacity:.78">ابتدا کالا را انتخاب کنید.</div>
+      <label class="field full"><span>توضیحات</span><textarea name="notes" rows="3"></textarea></label>
+      <button class="primary full submit" type="submit">ثبت تلفات و کسر از موجودی</button>
+    </form>`);
+  const form=$('#inventoryLossForm'); const sel=form.querySelector("[name='product_id']"); const help=$('#inventoryLossStockHelp');
+  const sync=()=>{const p=state.products.find(x=>String(x.product_id)===String(sel?.value||'')); if(!p){help.textContent='ابتدا کالا را انتخاب کنید.';return;} const stock=inventoryProductStock(p.product_id); const multi=String(p.usage_type||'')==='multi'; help.innerHTML=`موجودی فعلی: <b>${faNum(stock)} ${esc(p.unit||'عدد')}</b>${multi?' · برای کالای چندبارمصرف، تعداد «واحد فیزیکی» از دست‌رفته را وارد کنید.':''}`;};
+  if(sel) sel.onchange=sync; sync();
+  form.onsubmit=async e=>{e.preventDefault(); const data=formDataObject(e.target); const quantity=Number(rawNumber(data.quantity)||0); if(!data.product_id||quantity<=0){toast('کالا و تعداد تلفات را وارد کنید.',true);return;} const p=state.products.find(x=>String(x.product_id)===String(data.product_id)); const available=p?inventoryProductStock(p.product_id):0; if(quantity>available){toast(`تعداد واردشده از موجودی فعلی (${faNum(available)}) بیشتر است.`,true);return;} await submitPost('createInventoryLoss',{...data,quantity},'ضایعات / تلفات ثبت شد و موجودی اصلاح شد');};
+}
+
+
 function newConsumption() {
 
   if (!activeProducts().length) {
@@ -13694,32 +13781,32 @@ function renderReports() {
 
   title(
     "گزارش مدیریتی",
-    "فروش، سودآوری، دوره‌ها و انبار"
+    "فروش و سودآوری محقق‌شده، دوره‌ها و انبار"
   );
 
   const customers =
     finalCustomers();
 
+  const realized =
+    realizedFinanceSnapshot();
+
   const revenue =
-    finalCustomerRevenue();
+    realized.revenue;
 
   const generalExpense =
-    sumAmount(
-      state.expenses
-    );
+    realized.serviceExpense;
 
   const inventoryConsumedCost =
-    sumConsumptionCost(
-      state.consumptions
-    );
+    realized.inventoryCost;
+
+  const lossCost =
+    realized.lossCost;
 
   const totalExpense =
-    generalExpense +
-    inventoryConsumedCost;
+    realized.expense;
 
   const profit =
-    revenue -
-    totalExpense;
+    realized.profit;
 
   const margin =
     revenue
@@ -13733,9 +13820,14 @@ function renderReports() {
   const courseRows =
     financeCourseRows();
 
+  const completedCourseRows =
+    courseRows.filter(
+      x => x.realized
+    );
+
   const bestCourse =
-    courseRows.length
-      ? courseRows
+    completedCourseRows.length
+      ? completedCourseRows
           .slice()
           .sort(
             (a,b) =>
@@ -13815,7 +13907,7 @@ function renderReports() {
           ? "success"
           : "danger"
       }">
-        <span>سود خالص</span>
+        <span>سود خالص محقق‌شده</span>
         <strong>
           ${money(profit)}
         </strong>
@@ -14156,6 +14248,9 @@ function openAction(action) {
 
   if (action === "newConsumption")
     return newConsumption();
+
+  if (action === "newInventoryLoss")
+    return newInventoryLoss();
 }
 
 
@@ -14720,7 +14815,7 @@ function editCourse(course) {
                 : ""
             }
           >
-            فعال
+            جاری / در انتظار برگزاری
           </option>
 
           <option
@@ -14742,7 +14837,7 @@ function editCourse(course) {
                 : ""
             }
           >
-            پایان‌یافته
+            برگزار شده — وارد محاسبه سود
           </option>
         `
       )}
