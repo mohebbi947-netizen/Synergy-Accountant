@@ -23,6 +23,8 @@ const state = {
   inventoryMovements: [],
   inventoryLosses: [],
   pettyCashTransactions: [],
+  profitDistributions: [],
+  profitDistributionPayments: [],
   selectedLead: null,
   selectedCourse: null,
   loading: false
@@ -467,7 +469,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V31-SEPARATE-EXPENSE-CENTER";
+  "V32-PROFIT-DISTRIBUTION-SNAPSHOTS";
 
 document.documentElement
   .dataset
@@ -1676,6 +1678,10 @@ function cacheableStateSnapshot() {
         state.consumptions || [],
       pettyCashTransactions:
         state.pettyCashTransactions || [],
+      profitDistributions:
+        state.profitDistributions || [],
+      profitDistributionPayments:
+        state.profitDistributionPayments || [],
       inventoryLosses:
         state.inventoryLosses || [],
 
@@ -1778,6 +1784,10 @@ function saveStateCache() {
             state.consumptions || [],
           pettyCashTransactions:
             state.pettyCashTransactions || [],
+          profitDistributions:
+            state.profitDistributions || [],
+          profitDistributionPayments:
+            state.profitDistributionPayments || [],
           inventoryLosses:
             state.inventoryLosses || [],
           inventoryMovements:[]
@@ -2029,7 +2039,9 @@ async function loadAll(
         safeLoad("inventoryLosses", []),
         safeLoad("financeExtension", {
           transactions:[]
-        })
+        }),
+        safeLoad("profitDistributions", []),
+        safeLoad("profitDistributionPayments", [])
       ]);
 
     const values =
@@ -2059,7 +2071,9 @@ async function loadAll(
       consumptions,
       inventoryMovements,
       inventoryLosses,
-      financeExtension
+      financeExtension,
+      profitDistributions,
+      profitDistributionPayments
     ] = values;
 
     const assign = (
@@ -2176,6 +2190,18 @@ async function loadAll(
 
       anySuccess = true;
     }
+
+    assign(
+      profitDistributions,
+      "profitDistributions",
+      []
+    );
+
+    assign(
+      profitDistributionPayments,
+      "profitDistributionPayments",
+      []
+    );
 
     /*
       Inventory fallback:
@@ -8976,6 +9002,123 @@ function renderExpenses() {
 
 
 
+
+function totalDistributedProfitPaid() {
+  return (state.profitDistributionPayments || [])
+    .reduce((sum,item) => sum + Number(item.amount || 0), 0);
+}
+
+function activeProfitDistributionSnapshot() {
+  return (state.profitDistributions || [])
+    .slice()
+    .sort((a,b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))[0] || null;
+}
+
+function distributionPaymentsFor(distributionId) {
+  return (state.profitDistributionPayments || [])
+    .filter(p => String(p.distribution_id || "") === String(distributionId || ""));
+}
+
+function partnerDistributionMetrics(snapshot, partnerKey) {
+  if (!snapshot) return {entitlement:0,paid:0,remaining:0};
+
+  const entitlement =
+    partnerKey === "partner_60"
+      ? Number(snapshot.partner_60_amount || 0)
+      : Number(snapshot.partner_40_amount || 0);
+
+  const paid = distributionPaymentsFor(snapshot.distribution_id)
+    .filter(p => String(p.partner_key) === String(partnerKey))
+    .reduce((sum,p) => sum + Number(p.amount || 0), 0);
+
+  return {
+    entitlement,
+    paid,
+    remaining:Math.max(0, entitlement - paid)
+  };
+}
+
+function currentDistributableProfitForSnapshot() {
+  const realized = realizedFinanceSnapshot();
+  const petty = pettyCashMetrics();
+  const alreadyPaid = totalDistributedProfitPaid();
+
+  return Math.max(
+    0,
+    realized.profit - petty.balance - alreadyPaid
+  );
+}
+
+function openProfitDistributionPayment(snapshot, partnerKey) {
+  const metrics = partnerDistributionMetrics(snapshot, partnerKey);
+  const partnerLabel =
+    partnerKey === "partner_60"
+      ? "صاحب سهام ۶۰٪"
+      : "صاحب سهام ۴۰٪";
+
+  if (metrics.remaining <= 0) {
+    toast("مانده قابل پرداختی برای این صاحب سهام وجود ندارد.", true);
+    return;
+  }
+
+  modal(`
+    <div class="modal-title">
+      <span>PROFIT DISTRIBUTION PAYMENT</span>
+      <h2>ثبت واریز سود</h2>
+      <p>${partnerLabel} · مانده قابل پرداخت: ${money(metrics.remaining)}</p>
+    </div>
+
+    <form id="profitDistributionPaymentForm" class="form-grid">
+      ${formField("مبلغ واریز","amount","number","",metrics.remaining)}
+      ${formField("تاریخ واریز","payment_date","date")}
+      ${selectField(
+        "روش پرداخت",
+        "payment_method",
+        `
+          <option>انتقال بانکی</option>
+          <option>کارت به کارت</option>
+          <option>نقدی</option>
+          <option>سایر</option>
+        `
+      )}
+      ${formField("شماره پیگیری","reference")}
+      <label class="field full">
+        <span>توضیحات</span>
+        <textarea name="notes" rows="3"></textarea>
+      </label>
+      <button class="primary full submit" type="submit">ثبت واریز</button>
+    </form>
+  `);
+
+  $("#profitDistributionPaymentForm").onsubmit = async e => {
+    e.preventDefault();
+    const data = formDataObject(e.target);
+    const amount = Number(rawNumber(data.amount) || 0);
+
+    if (amount <= 0) {
+      toast("مبلغ واریز باید بیشتر از صفر باشد.", true);
+      return;
+    }
+
+    if (amount > metrics.remaining) {
+      toast("مبلغ واریز از مانده قابل پرداخت بیشتر است.", true);
+      return;
+    }
+
+    await submitPost(
+      "createProfitDistributionPayment",
+      {
+        ...data,
+        amount,
+        distribution_id:snapshot.distribution_id,
+        partner_key:partnerKey
+      },
+      "واریز سود ثبت شد"
+    );
+  };
+}
+
+
 function renderFinance() {
   title("مالی و سودآوری","سود محقق‌شده فقط از دوره‌های برگزارشده محاسبه می‌شود");
   const realized = realizedFinanceSnapshot();
@@ -8989,6 +9132,25 @@ function renderFinance() {
   const profit = realized.profit;
   const petty = pettyCashMetrics();
   const distributableProfit = profit - petty.balance;
+
+  const activeDistribution =
+    activeProfitDistributionSnapshot();
+
+  const partner60 =
+    partnerDistributionMetrics(
+      activeDistribution,
+      "partner_60"
+    );
+
+  const partner40 =
+    partnerDistributionMetrics(
+      activeDistribution,
+      "partner_40"
+    );
+
+  const undistributedNow =
+    currentDistributableProfitForSnapshot();
+
   const margin = revenue ? Math.round((profit/revenue)*100) : 0;
   const rows = financeCourseRows();
   const completedRows = rows.filter(x=>x.realized);
@@ -9072,6 +9234,134 @@ function renderFinance() {
     </div>
 
 
+
+
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        <div>
+          <h3>توزیع سود صاحبان سهام</h3>
+          <p>مبلغ سهم‌ها فقط وقتی نمایش داده می‌شود که خودتان محاسبه را انجام دهید.</p>
+        </div>
+        <button id="calculateProfitDistributionBtn" type="button" class="primary">
+          محاسبه سود قابل تقسیم
+        </button>
+      </div>
+
+      ${
+        activeDistribution
+          ? `
+            <div class="kpi-grid" style="margin-top:10px">
+              <div class="kpi success">
+                <span>مبلغ Snapshot</span>
+                <strong>${money(activeDistribution.distributable_amount)}</strong>
+                <small>${dateFa(activeDistribution.distribution_date || activeDistribution.created_at)}</small>
+              </div>
+              <div class="kpi">
+                <span>پرداخت‌شده از این Snapshot</span>
+                <strong>${money(partner60.paid + partner40.paid)}</strong>
+                <small>مجموع واریز به صاحبان سهام</small>
+              </div>
+              <div class="kpi warning">
+                <span>مانده Snapshot</span>
+                <strong>${money(partner60.remaining + partner40.remaining)}</strong>
+                <small>هنوز قابل پرداخت</small>
+              </div>
+              <div class="kpi">
+                <span>سود جدیدِ هنوز محاسبه‌نشده</span>
+                <strong>${money(undistributedNow)}</strong>
+                <small>تا محاسبه بعدی وارد Snapshot جدید نمی‌شود</small>
+              </div>
+            </div>
+
+            <div class="two-col" style="margin-top:14px">
+              <div class="panel" style="margin:0">
+                <div class="panel-head">
+                  <div><h3>صاحب سهام ۶۰٪</h3><p>سهم از Snapshot فعلی</p></div>
+                </div>
+                <div class="finance-strip">
+                  <div><span>سهم تعلق‌گرفته</span><strong>${money(partner60.entitlement)}</strong></div>
+                  <div><span>پرداخت‌شده</span><strong>${money(partner60.paid)}</strong></div>
+                  <div><span>مانده قابل پرداخت</span><strong>${money(partner60.remaining)}</strong></div>
+                </div>
+                <button
+                  type="button"
+                  class="primary"
+                  data-profit-payment="partner_60"
+                  ${partner60.remaining <= 0 ? "disabled" : ""}
+                  style="margin-top:12px;width:100%"
+                >
+                  ثبت واریز برای صاحب سهام ۶۰٪
+                </button>
+              </div>
+
+              <div class="panel" style="margin:0">
+                <div class="panel-head">
+                  <div><h3>صاحب سهام ۴۰٪</h3><p>سهم از Snapshot فعلی</p></div>
+                </div>
+                <div class="finance-strip">
+                  <div><span>سهم تعلق‌گرفته</span><strong>${money(partner40.entitlement)}</strong></div>
+                  <div><span>پرداخت‌شده</span><strong>${money(partner40.paid)}</strong></div>
+                  <div><span>مانده قابل پرداخت</span><strong>${money(partner40.remaining)}</strong></div>
+                </div>
+                <button
+                  type="button"
+                  class="primary"
+                  data-profit-payment="partner_40"
+                  ${partner40.remaining <= 0 ? "disabled" : ""}
+                  style="margin-top:12px;width:100%"
+                >
+                  ثبت واریز برای صاحب سهام ۴۰٪
+                </button>
+              </div>
+            </div>
+
+            <div style="margin-top:14px">
+              <div class="panel-head">
+                <div><h3>تاریخچه واریز سود</h3><p>واریزهای Snapshot فعلی</p></div>
+              </div>
+
+              ${
+                distributionPaymentsFor(activeDistribution.distribution_id).length
+                  ? `
+                    <div class="lead-list">
+                      ${
+                        distributionPaymentsFor(activeDistribution.distribution_id)
+                          .slice()
+                          .sort((a,b) =>
+                            String(b.payment_date || b.created_at || "")
+                              .localeCompare(String(a.payment_date || a.created_at || ""))
+                          )
+                          .map(p => `
+                            <div class="lead-row" style="cursor:default">
+                              <div class="avatar">$</div>
+                              <div class="lead-main">
+                                <b>${p.partner_key === "partner_60" ? "صاحب سهام ۶۰٪" : "صاحب سهام ۴۰٪"}</b>
+                                <span>
+                                  ${esc(p.payment_method || "روش پرداخت نامشخص")}
+                                  ${p.reference ? ` · پیگیری: ${esc(p.reference)}` : ""}
+                                </span>
+                              </div>
+                              <div class="lead-end">
+                                <b>${money(p.amount)}</b>
+                                <small>${dateFa(p.payment_date || p.created_at)}</small>
+                              </div>
+                            </div>
+                          `).join("")
+                      }
+                    </div>
+                  `
+                  : `<div class="empty"><b>هنوز واریزی برای این Snapshot ثبت نشده</b></div>`
+              }
+            </div>
+          `
+          : `
+            <div class="empty">
+              <b>هنوز محاسبه‌ای انجام نشده</b>
+              <span>برای مشاهده سهم ۶۰٪ و ۴۰٪ روی «محاسبه سود قابل تقسیم» بزنید.</span>
+            </div>
+          `
+      }
+    </section>
 
     <section class="panel" style="margin-top:14px">
       <div class="panel-head">
@@ -9700,6 +9990,62 @@ function renderFinance() {
 
 
   bindActions();
+
+  const calcDistributionBtn =
+    $("#calculateProfitDistributionBtn");
+
+  if (calcDistributionBtn) {
+    calcDistributionBtn.onclick = async () => {
+      const available =
+        currentDistributableProfitForSnapshot();
+
+      if (available <= 0) {
+        toast("در حال حاضر سود جدیدی برای تقسیم وجود ندارد.", true);
+        return;
+      }
+
+      const ok =
+        confirm(
+          `مبلغ ${money(available)} به عنوان Snapshot جدید سود قابل تقسیم ثبت شود؟\n\nسهم ۶۰٪ و ۴۰٪ بر اساس همین مبلغ محاسبه می‌شود و سودهای بعدی تا محاسبه بعدی به این Snapshot اضافه نمی‌شوند.`
+        );
+
+      if (!ok) return;
+
+      try {
+        calcDistributionBtn.disabled = true;
+        calcDistributionBtn.textContent = "در حال محاسبه...";
+
+        const result =
+          await post(
+            "createProfitDistributionSnapshot",
+            {distributable_amount:available}
+          );
+
+        if (!result?.success) {
+          throw new Error(result?.message || "محاسبه سود قابل تقسیم انجام نشد.");
+        }
+
+        toast("Snapshot سود قابل تقسیم ثبت شد");
+        await loadAll(false);
+
+      } catch (error) {
+        toast(error.message || "محاسبه سود قابل تقسیم انجام نشد.", true);
+        calcDistributionBtn.disabled = false;
+        calcDistributionBtn.textContent = "محاسبه سود قابل تقسیم";
+      }
+    };
+  }
+
+  $$("[data-profit-payment]").forEach(button => {
+    button.onclick = () => {
+      if (!activeDistribution) return;
+      openProfitDistributionPayment(
+        activeDistribution,
+        button.dataset.profitPayment
+      );
+    };
+  });
+
 
   const expensesPageBtn =
     $("#openExpensesPage");
