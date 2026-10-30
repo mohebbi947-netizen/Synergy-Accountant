@@ -25,6 +25,7 @@ const state = {
   pettyCashTransactions: [],
   profitDistributions: [],
   profitDistributionPayments: [],
+  profitDistributionPreview: null,
   selectedLead: null,
   selectedCourse: null,
   loading: false
@@ -552,7 +553,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V33-AUTO-PETTY-TOPUP-10M";
+  "V34-PREVIEW-ONLY-PROFIT-DISTRIBUTION";
 
 document.documentElement
   .dataset
@@ -9645,102 +9646,278 @@ function currentDistributableProfitForSnapshot() {
     pettyCashMetrics();
 
   /*
-    A profit amount is reserved for shareholders as soon as a Snapshot
-    is created — not only after it is actually paid.
+    FINAL ACCOUNTING RULE:
+    Calculation/preview does NOT reserve or remove profit.
+    Only shareholder payments that were actually made reduce
+    the remaining distributable profit.
 
-    Therefore a new Snapshot must contain ONLY profit generated after
-    earlier Snapshots. This prevents the same profit being allocated twice.
+    Remaining distributable profit =
+      realized net profit
+      - current petty cash balance
+      - actual shareholder payouts
   */
-  const alreadySnapshotted =
-    totalSnapshottedProfit();
+  const actuallyPaid =
+    totalDistributedProfitPaid();
 
   return Math.max(
     0,
-    Math.round(
-      realized.profit -
-      petty.balance -
-      alreadySnapshotted
-    )
+    realized.profit -
+    petty.balance -
+    actuallyPaid
   );
 }
 
-function openProfitDistributionPayment(snapshot, partnerKey) {
-  const metrics = partnerDistributionMetrics(snapshot, partnerKey);
+
+function buildProfitDistributionPreview() {
+
+  const amount =
+    currentDistributableProfitForSnapshot();
+
+  if (amount <= 0) {
+    return null;
+  }
+
+  return {
+    distributable_amount:
+      amount,
+    partner_60_amount:
+      amount * 0.60,
+    partner_40_amount:
+      amount * 0.40,
+    calculated_at:
+      new Date()
+        .toISOString()
+  };
+}
+
+
+function openProfitDistributionPayment(
+  preview,
+  partnerKey
+) {
+
+  if (!preview) {
+    toast(
+      "ابتدا سود قابل تقسیم را محاسبه کنید.",
+      true
+    );
+    return;
+  }
+
+
+  const entitlement =
+    partnerKey ===
+      "partner_60"
+      ? Number(
+          preview.partner_60_amount ||
+          0
+        )
+      : Number(
+          preview.partner_40_amount ||
+          0
+        );
+
+
   const partnerLabel =
     partnerKey === "partner_60"
       ? "صاحب سهام ۶۰٪"
       : "صاحب سهام ۴۰٪";
 
-  if (metrics.remaining <= 0) {
-    toast("مانده قابل پرداختی برای این صاحب سهام وجود ندارد.", true);
-    return;
-  }
 
   modal(`
+
     <div class="modal-title">
-      <span>PROFIT DISTRIBUTION PAYMENT</span>
-      <h2>ثبت واریز سود</h2>
-      <p>${partnerLabel} · مانده قابل پرداخت: ${shareholderMoney(metrics.remaining)}</p>
+      <span>
+        PROFIT DISTRIBUTION PAYMENT
+      </span>
+
+      <h2>
+        ثبت واریز سود
+      </h2>
+
+      <p>
+        ${partnerLabel}
+        ·
+        مبلغ پیشنهادی بر اساس محاسبه فعلی:
+        ${shareholderMoney(
+          entitlement
+        )}
+      </p>
     </div>
 
-    <form id="profitDistributionPaymentForm" class="form-grid">
-      ${formField("مبلغ واریز","amount","number","",shareholderToman(metrics.remaining))}
-      ${formField("تاریخ واریز","payment_date","date")}
+
+    <form
+      id="profitDistributionPaymentForm"
+      class="form-grid"
+    >
+
+      ${formField(
+        "مبلغ واریز",
+        "amount",
+        "number",
+        "",
+        shareholderToman(
+          entitlement
+        )
+      )}
+
+      ${formField(
+        "تاریخ واریز",
+        "payment_date",
+        "date"
+      )}
+
       ${selectField(
         "روش پرداخت",
         "payment_method",
         `
-          <option>انتقال بانکی</option>
-          <option>کارت به کارت</option>
-          <option>نقدی</option>
-          <option>سایر</option>
+          <option>
+            انتقال بانکی
+          </option>
+          <option>
+            کارت به کارت
+          </option>
+          <option>
+            نقدی
+          </option>
+          <option>
+            سایر
+          </option>
         `
       )}
-      ${formField("شماره پیگیری","reference")}
+
+      ${formField(
+        "شماره پیگیری",
+        "reference"
+      )}
+
       <label class="field full">
-        <span>توضیحات</span>
-        <textarea name="notes" rows="3"></textarea>
+        <span>
+          توضیحات
+        </span>
+        <textarea
+          name="notes"
+          rows="3"
+        ></textarea>
       </label>
-      <button class="primary full submit" type="submit">ثبت واریز</button>
+
+
+      <button
+        class="primary full submit"
+        type="submit"
+      >
+        ثبت واریز واقعی
+      </button>
+
     </form>
   `);
 
-  $("#profitDistributionPaymentForm").onsubmit = async e => {
-    e.preventDefault();
-    const data = formDataObject(e.target);
-    const amount = Number(rawNumber(data.amount) || 0);
 
-    if (amount <= 0) {
-      toast("مبلغ واریز باید بیشتر از صفر باشد.", true);
-      return;
-    }
+  $("#profitDistributionPaymentForm")
+    .onsubmit =
+      async e => {
 
-    const remainingToman =
-      shareholderToman(
-        metrics.remaining
-      );
+        e.preventDefault();
 
-    if (amount > remainingToman) {
-      toast(
-        "مبلغ واریز از مانده قابل پرداخت بیشتر است.",
-        true
-      );
-      return;
-    }
+        const data =
+          formDataObject(
+            e.target
+          );
 
-    await submitPost(
-      "createProfitDistributionPayment",
-      {
-        ...data,
-        amount_toman:amount,
-        distribution_id:snapshot.distribution_id,
-        partner_key:partnerKey
-      },
-      "واریز سود ثبت شد"
-    );
-  };
+        const amountToman =
+          Number(
+            rawNumber(
+              data.amount
+            ) || 0
+          );
+
+
+        if (
+          amountToman <= 0
+        ) {
+          toast(
+            "مبلغ واریز باید بیشتر از صفر باشد.",
+            true
+          );
+          return;
+        }
+
+
+        const availableNow =
+          currentDistributableProfitForSnapshot();
+
+        const amountBase =
+          amountToman /
+          1000;
+
+
+        if (
+          amountBase >
+          availableNow +
+          0.000001
+        ) {
+          toast(
+            "این مبلغ از سود قابل تقسیم فعلی بیشتر است.",
+            true
+          );
+          return;
+        }
+
+
+        try {
+
+          const result =
+            await post(
+              "createProfitDistributionPayment",
+              {
+                ...data,
+                amount_toman:
+                  amountToman,
+                partner_key:
+                  partnerKey,
+                preview_total:
+                  preview.distributable_amount
+              }
+            );
+
+
+          if (!result?.success) {
+            throw new Error(
+              result?.message ||
+              "ثبت واریز انجام نشد."
+            );
+          }
+
+
+          /*
+            Any real payment invalidates the previous preview.
+            User must calculate again from the new remaining
+            distributable profit.
+          */
+          state.profitDistributionPreview =
+            null;
+
+
+          toast(
+            "واریز ثبت شد؛ برای مبلغ باقی‌مانده دوباره محاسبه را بزنید"
+          );
+
+
+          await loadAll(
+            false
+          );
+
+
+        } catch (error) {
+
+          toast(
+            error.message ||
+            "ثبت واریز انجام نشد.",
+            true
+          );
+        }
+      };
 }
-
 
 function renderFinance() {
   title("مالی و سودآوری","سود محقق‌شده فقط از دوره‌های برگزارشده محاسبه می‌شود");
@@ -9774,23 +9951,29 @@ function renderFinance() {
     petty.balance -
     shareholderProfitPaid;
 
-  const activeDistribution =
-    activeProfitDistributionSnapshot();
-
-  const partner60 =
-    partnerDistributionMetrics(
-      activeDistribution,
-      "partner_60"
-    );
-
-  const partner40 =
-    partnerDistributionMetrics(
-      activeDistribution,
-      "partner_40"
-    );
+  const activePreview =
+    state.profitDistributionPreview;
 
   const undistributedNow =
     currentDistributableProfitForSnapshot();
+
+  const preview60 =
+    activePreview
+      ? Number(
+          activePreview
+            .partner_60_amount ||
+          0
+        )
+      : 0;
+
+  const preview40 =
+    activePreview
+      ? Number(
+          activePreview
+            .partner_40_amount ||
+          0
+        )
+      : 0;
 
   const margin = revenue ? Math.round((profit/revenue)*100) : 0;
   const rows = financeCourseRows();
@@ -9881,141 +10064,274 @@ function renderFinance() {
       class="panel profit-distribution-section"
       style="margin-top:14px"
     >
+
       <div class="panel-head">
+
         <div>
-          <h3>توزیع سود صاحبان سهام</h3>
-          <p>مبلغ سهم‌ها فقط وقتی نمایش داده می‌شود که خودتان محاسبه را انجام دهید.</p>
+          <h3>
+            محاسبه سود قابل تقسیم
+          </h3>
+
+          <p>
+            محاسبه فقط یک Preview است و چیزی از سود کم نمی‌کند. فقط واریز واقعی به سهامدار از سود قابل تقسیم خارج می‌شود.
+          </p>
         </div>
-        <button id="calculateProfitDistributionBtn" type="button" class="primary">
+
+
+        <button
+          id="calculateProfitDistributionBtn"
+          type="button"
+          class="primary"
+        >
           محاسبه سود قابل تقسیم
         </button>
+
       </div>
 
+
       ${
-        activeDistribution
+        activePreview
           ? `
-            <div class="kpi-grid" style="margin-top:10px">
+            <div
+              class="kpi-grid"
+              style="margin-top:10px"
+            >
+
               <div class="kpi success">
-                <span>مبلغ Snapshot</span>
-                <strong class="profit-exact-amount">${shareholderMoney(activeDistribution.distributable_amount)}</strong>
-                <small>${dateFa(activeDistribution.distribution_date || activeDistribution.created_at)}</small>
+                <span>
+                  سود قابل تقسیم فعلی
+                </span>
+
+                <strong class="profit-exact-amount">
+                  ${shareholderMoney(
+                    activePreview
+                      .distributable_amount
+                  )}
+                </strong>
+
+                <small>
+                  فقط Preview؛ هنوز چیزی تخصیص یا کسر نشده
+                </small>
               </div>
+
+
               <div class="kpi">
-                <span>پرداخت‌شده از این Snapshot</span>
-                <strong class="profit-exact-amount">${shareholderMoney(partner60.paid + partner40.paid)}</strong>
-                <small>مجموع واریز به صاحبان سهام</small>
+                <span>
+                  سهم ۶۰٪
+                </span>
+
+                <strong class="profit-exact-amount">
+                  ${shareholderMoney(
+                    preview60
+                  )}
+                </strong>
+
+                <small>
+                  مبلغ پیشنهادی بر اساس محاسبه فعلی
+                </small>
               </div>
-              <div class="kpi warning">
-                <span>مانده Snapshot</span>
-                <strong class="profit-exact-amount">${shareholderMoney(partner60.remaining + partner40.remaining)}</strong>
-                <small>هنوز قابل پرداخت</small>
-              </div>
+
+
               <div class="kpi">
-                <span>سود جدیدِ هنوز محاسبه‌نشده</span>
-                <strong class="profit-exact-amount">${shareholderMoney(undistributedNow)}</strong>
-                <small>تا محاسبه بعدی وارد Snapshot جدید نمی‌شود</small>
+                <span>
+                  سهم ۴۰٪
+                </span>
+
+                <strong class="profit-exact-amount">
+                  ${shareholderMoney(
+                    preview40
+                  )}
+                </strong>
+
+                <small>
+                  مبلغ پیشنهادی بر اساس محاسبه فعلی
+                </small>
               </div>
+
             </div>
 
-            <div class="two-col" style="margin-top:14px">
-              <div class="panel" style="margin:0">
-                <div class="panel-head">
-                  <div><h3>صاحب سهام ۶۰٪</h3><p>سهم از Snapshot فعلی</p></div>
-                </div>
-                <div class="finance-strip">
-                  <div><span>سهم تعلق‌گرفته</span><strong class="profit-exact-amount">${shareholderMoney(partner60.entitlement)}</strong></div>
-                  <div><span>پرداخت‌شده</span><strong class="profit-exact-amount">${shareholderMoney(partner60.paid)}</strong></div>
-                  <div><span>مانده قابل پرداخت</span><strong class="profit-exact-amount">${shareholderMoney(partner60.remaining)}</strong></div>
-                </div>
-                <button
-                  type="button"
-                  class="primary"
-                  data-profit-payment="partner_60"
-                  ${partner60.remaining <= 0 ? "disabled" : ""}
-                  style="margin-top:12px;width:100%"
-                >
-                  ثبت واریز برای صاحب سهام ۶۰٪
-                </button>
-              </div>
 
-              <div class="panel" style="margin:0">
-                <div class="panel-head">
-                  <div><h3>صاحب سهام ۴۰٪</h3><p>سهم از Snapshot فعلی</p></div>
-                </div>
-                <div class="finance-strip">
-                  <div><span>سهم تعلق‌گرفته</span><strong class="profit-exact-amount">${shareholderMoney(partner40.entitlement)}</strong></div>
-                  <div><span>پرداخت‌شده</span><strong class="profit-exact-amount">${shareholderMoney(partner40.paid)}</strong></div>
-                  <div><span>مانده قابل پرداخت</span><strong class="profit-exact-amount">${shareholderMoney(partner40.remaining)}</strong></div>
-                </div>
-                <button
-                  type="button"
-                  class="primary"
-                  data-profit-payment="partner_40"
-                  ${partner40.remaining <= 0 ? "disabled" : ""}
-                  style="margin-top:12px;width:100%"
-                >
-                  ثبت واریز برای صاحب سهام ۴۰٪
-                </button>
-              </div>
-            </div>
+            <div
+              class="two-col"
+              style="margin-top:14px"
+            >
 
-            <div style="margin-top:14px">
-              <div class="panel-head">
-                <div><h3>تاریخچه واریز سود</h3><p>واریزهای Snapshot فعلی</p></div>
-              </div>
+              <button
+                type="button"
+                class="primary"
+                data-profit-preview-payment="partner_60"
+              >
+                ثبت واریز واقعی برای صاحب سهام ۶۰٪
+              </button>
 
-              ${
-                distributionPaymentsFor(activeDistribution.distribution_id).length
-                  ? `
-                    <div class="lead-list">
-                      ${
-                        distributionPaymentsFor(activeDistribution.distribution_id)
-                          .slice()
-                          .sort((a,b) =>
-                            String(b.payment_date || b.created_at || "")
-                              .localeCompare(String(a.payment_date || a.created_at || ""))
-                          )
-                          .map(p => `
-                            <div class="lead-row" style="cursor:default">
-                              <div class="avatar">$</div>
-                              <div class="lead-main">
-                                <b>${p.partner_key === "partner_60" ? "صاحب سهام ۶۰٪" : "صاحب سهام ۴۰٪"}</b>
-                                <span>
-                                  ${esc(p.payment_method || "روش پرداخت نامشخص")}
-                                  ${p.reference ? ` · پیگیری: ${esc(p.reference)}` : ""}
-                                </span>
-                              </div>
-                              <div class="lead-end">
-                                <b>${shareholderMoney(p.amount)}</b>
-                                <small>${dateFa(p.payment_date || p.created_at)}</small>
 
-                                <button
-                                  type="button"
-                                  class="danger-action mini-edit-btn"
-                                  data-delete-profit-payment="${esc(
-                                    p.payment_id
-                                  )}"
-                                  style="margin-top:6px"
-                                >
-                                  حذف
-                                </button>
-                              </div>
-                            </div>
-                          `).join("")
-                      }
-                    </div>
-                  `
-                  : `<div class="empty"><b>هنوز واریزی برای این Snapshot ثبت نشده</b></div>`
-              }
+              <button
+                type="button"
+                class="primary"
+                data-profit-preview-payment="partner_40"
+              >
+                ثبت واریز واقعی برای صاحب سهام ۴۰٪
+              </button>
+
             </div>
           `
           : `
             <div class="empty">
-              <b>هنوز محاسبه‌ای انجام نشده</b>
-              <span>برای مشاهده سهم ۶۰٪ و ۴۰٪ روی «محاسبه سود قابل تقسیم» بزنید.</span>
+              <b>
+                هنوز محاسبه‌ای انجام نشده
+              </b>
+
+              <span>
+                برای مشاهده مبلغ قابل تقسیم و سهم ۶۰٪ / ۴۰٪، دکمه محاسبه را بزنید.
+              </span>
             </div>
           `
       }
+
+
+      <div
+        style="
+          margin-top:16px;
+          padding-top:14px;
+          border-top:
+            1px solid
+            rgba(255,255,255,.10);
+        "
+      >
+
+        <div class="panel-head">
+
+          <div>
+            <h3>
+              تاریخچه واریز واقعی سود
+            </h3>
+
+            <p>
+              فقط پرداخت‌های واقعی ثبت‌شده؛ این مبالغ از سود قابل تقسیم کم شده‌اند.
+            </p>
+          </div>
+
+          <span class="count">
+            ${faNum(
+              validProfitDistributionPayments()
+                .length
+            )}
+          </span>
+
+        </div>
+
+
+        ${
+          validProfitDistributionPayments()
+            .length
+            ? `
+              <div class="lead-list">
+
+                ${
+                  validProfitDistributionPayments()
+                    .slice()
+                    .sort(
+                      (a,b) =>
+                        String(
+                          b.payment_date ||
+                          b.created_at ||
+                          ""
+                        ).localeCompare(
+                          String(
+                            a.payment_date ||
+                            a.created_at ||
+                            ""
+                          )
+                        )
+                    )
+                    .map(
+                      p => `
+                        <div
+                          class="lead-row"
+                          style="cursor:default"
+                        >
+
+                          <div class="avatar">
+                            $
+                          </div>
+
+
+                          <div class="lead-main">
+
+                            <b>
+                              ${
+                                p.partner_key ===
+                                  "partner_60"
+                                  ? "صاحب سهام ۶۰٪"
+                                  : "صاحب سهام ۴۰٪"
+                              }
+                            </b>
+
+                            <span>
+                              ${esc(
+                                p.payment_method ||
+                                "روش پرداخت نامشخص"
+                              )}
+
+                              ${
+                                p.reference
+                                  ? ` · پیگیری: ${esc(
+                                      p.reference
+                                    )}`
+                                  : ""
+                              }
+                            </span>
+
+                          </div>
+
+
+                          <div class="lead-end">
+
+                            <b>
+                              ${shareholderMoney(
+                                p.amount
+                              )}
+                            </b>
+
+                            <small>
+                              ${dateFa(
+                                p.payment_date ||
+                                p.created_at
+                              )}
+                            </small>
+
+                            <button
+                              type="button"
+                              class="danger-action mini-edit-btn"
+                              data-delete-profit-payment="${esc(
+                                p.payment_id
+                              )}"
+                              style="margin-top:6px"
+                            >
+                              حذف
+                            </button>
+
+                          </div>
+
+                        </div>
+                      `
+                    )
+                    .join("")
+                }
+
+              </div>
+            `
+            : `
+              <div class="empty">
+                <b>
+                  هنوز واریز واقعی سود ثبت نشده
+                </b>
+              </div>
+            `
+        }
+
+      </div>
+
     </section>
 
     <section class="panel" style="margin-top:14px">
@@ -10658,56 +10974,59 @@ function renderFinance() {
     $("#calculateProfitDistributionBtn");
 
   if (calcDistributionBtn) {
-    calcDistributionBtn.onclick = async () => {
-      const available =
-        currentDistributableProfitForSnapshot();
 
-      if (available <= 0) {
-        toast("در حال حاضر سود جدیدی برای تقسیم وجود ندارد.", true);
-        return;
-      }
+    calcDistributionBtn.onclick =
+      () => {
 
-      const ok =
-        confirm(
-          `مبلغ ${shareholderMoney(available)} به عنوان Snapshot جدید سود قابل تقسیم ثبت شود؟\n\nسهم ۶۰٪ و ۴۰٪ بر اساس همین مبلغ محاسبه می‌شود و سودهای بعدی تا محاسبه بعدی به این Snapshot اضافه نمی‌شوند.`
-        );
+        const preview =
+          buildProfitDistributionPreview();
 
-      if (!ok) return;
-
-      try {
-        calcDistributionBtn.disabled = true;
-        calcDistributionBtn.textContent = "در حال محاسبه...";
-
-        const result =
-          await post(
-            "createProfitDistributionSnapshot",
-            {distributable_amount:available}
+        if (!preview) {
+          toast(
+            "در حال حاضر سود قابل تقسیمی وجود ندارد.",
+            true
           );
-
-        if (!result?.success) {
-          throw new Error(result?.message || "محاسبه سود قابل تقسیم انجام نشد.");
+          return;
         }
 
-        toast("Snapshot سود قابل تقسیم ثبت شد");
-        await loadAll(false);
 
-      } catch (error) {
-        toast(error.message || "محاسبه سود قابل تقسیم انجام نشد.", true);
-        calcDistributionBtn.disabled = false;
-        calcDistributionBtn.textContent = "محاسبه سود قابل تقسیم";
-      }
-    };
+        state.profitDistributionPreview =
+          preview;
+
+
+        renderFinance();
+      };
   }
 
-  $$("[data-profit-payment]").forEach(button => {
-    button.onclick = () => {
-      if (!activeDistribution) return;
-      openProfitDistributionPayment(
-        activeDistribution,
-        button.dataset.profitPayment
-      );
-    };
-  });
+
+  $$("[data-profit-preview-payment]")
+    .forEach(
+      button => {
+
+        button.onclick =
+          () => {
+
+            if (
+              !state
+                .profitDistributionPreview
+            ) {
+              toast(
+                "ابتدا سود قابل تقسیم را محاسبه کنید.",
+                true
+              );
+              return;
+            }
+
+
+            openProfitDistributionPayment(
+              state
+                .profitDistributionPreview,
+              button.dataset
+                .profitPreviewPayment
+            );
+          };
+      }
+    );
 
 
   $$("[data-delete-profit-payment]")
@@ -10719,7 +11038,8 @@ function renderFinance() {
 
             const payment =
               (
-                state.profitDistributionPayments ||
+                state
+                  .profitDistributionPayments ||
                 []
               )
                 .find(
@@ -10740,20 +11060,13 @@ function renderFinance() {
               confirm(
                 `این واریز سود به مبلغ ${shareholderMoney(
                   payment.amount
-                )} حذف شود؟\n\nبعد از حذف، مبلغ دوباره به مانده قابل پرداخت سهامدار و سود قابل تقسیم برمی‌گردد.`
+                )} حذف شود؟\n\nبعد از حذف، مبلغ دوباره به سود قابل تقسیم برمی‌گردد.`
               );
 
             if (!ok) return;
 
 
             try {
-
-              button.disabled =
-                true;
-
-              button.textContent =
-                "در حال حذف...";
-
 
               const result =
                 await post(
@@ -10773,8 +11086,12 @@ function renderFinance() {
               }
 
 
+              state.profitDistributionPreview =
+                null;
+
+
               toast(
-                "واریز سود حذف شد و مانده‌ها اصلاح شدند"
+                "واریز حذف شد و مبلغ به سود قابل تقسیم برگشت"
               );
 
 
@@ -10790,17 +11107,10 @@ function renderFinance() {
                 "حذف واریز انجام نشد.",
                 true
               );
-
-              button.disabled =
-                false;
-
-              button.textContent =
-                "حذف";
             }
           };
       }
     );
-
 
   const expensesPageBtn =
     $("#openExpensesPage");
