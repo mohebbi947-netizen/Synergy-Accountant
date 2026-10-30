@@ -552,7 +552,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V32.3-SHAREHOLDER-EXACT-RATIO";
+  "V32.4-DISTRIBUTABLE-AFTER-PAYOUT";
 
 document.documentElement
   .dataset
@@ -9300,8 +9300,26 @@ function renderFinance() {
   const expense = realized.expense;
   const purchaseSpend = state.purchases.reduce((sum,p)=>sum+Number(p.total_amount||0),0);
   const profit = realized.profit;
-  const petty = pettyCashMetrics();
-  const distributableProfit = profit - petty.balance;
+  const petty =
+    pettyCashMetrics();
+
+  /*
+    Shareholder distributions are NOT expenses, so they do not reduce
+    net profit. But once cash is actually paid to shareholders, that
+    amount is no longer available for future distribution.
+
+    Remaining distributable profit =
+      realized net profit
+      - current petty cash reserve
+      - actual shareholder payouts
+  */
+  const shareholderProfitPaid =
+    totalDistributedProfitPaid();
+
+  const distributableProfit =
+    profit -
+    petty.balance -
+    shareholderProfitPaid;
 
   const activeDistribution =
     activeProfitDistributionSnapshot();
@@ -9560,7 +9578,7 @@ function renderFinance() {
         <div>
           <h3>تنخواه و سود قابل تقسیم</h3>
           <p>
-            مانده تنخواه پول آکادمی است، اما تا زمانی که در تنخواه باقی مانده بین شرکا تقسیم نمی‌شود.
+            مانده تنخواه تا زمان مصرف یا برگشت تقسیم نمی‌شود. واریز واقعی سود به سهامداران نیز از مانده سود قابل تقسیم کم می‌شود، بدون اینکه هزینه یا سود خالص را تغییر دهد.
           </p>
         </div>
 
@@ -9617,10 +9635,18 @@ function renderFinance() {
           <small>فعلاً غیرقابل تقسیم</small>
         </div>
 
+        <div class="kpi">
+          <span>واریز سود به سهامداران</span>
+          <strong>${money(shareholderProfitPaid)}</strong>
+          <small>توزیع سود؛ هزینه آکادمی نیست</small>
+        </div>
+
         <div class="kpi success">
-          <span>سود قابل تقسیم</span>
+          <span>سود قابل تقسیم باقی‌مانده</span>
           <strong>${money(distributableProfit)}</strong>
-          <small>سود خالص منهای مانده تنخواه</small>
+          <small>
+            سود خالص − مانده تنخواه − واریز واقعی به سهامداران
+          </small>
         </div>
 
       </div>
