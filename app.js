@@ -552,7 +552,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V32.2-SHAREHOLDER-FULL-TOMAN";
+  "V32.3-SHAREHOLDER-EXACT-RATIO";
 
 document.documentElement
   .dataset
@@ -9120,22 +9120,66 @@ function distributionPaymentsFor(distributionId) {
     .filter(p => String(p.distribution_id || "") === String(distributionId || ""));
 }
 
-function partnerDistributionMetrics(snapshot, partnerKey) {
-  if (!snapshot) return {entitlement:0,paid:0,remaining:0};
+function partnerDistributionMetrics(
+  snapshot,
+  partnerKey
+) {
+
+  if (!snapshot) {
+    return {
+      entitlement:0,
+      paid:0,
+      remaining:0
+    };
+  }
+
+  /*
+    Always calculate from the total Snapshot amount.
+    Older snapshots stored partner shares rounded at the
+    thousand-toman level, which lost the final 200/800 toman.
+  */
+  const snapshotAmount =
+    Number(
+      snapshot.distributable_amount ||
+      0
+    );
 
   const entitlement =
     partnerKey === "partner_60"
-      ? Number(snapshot.partner_60_amount || 0)
-      : Number(snapshot.partner_40_amount || 0);
+      ? snapshotAmount * 0.60
+      : snapshotAmount * 0.40;
 
-  const paid = distributionPaymentsFor(snapshot.distribution_id)
-    .filter(p => String(p.partner_key) === String(partnerKey))
-    .reduce((sum,p) => sum + Number(p.amount || 0), 0);
+  const paid =
+    distributionPaymentsFor(
+      snapshot.distribution_id
+    )
+      .filter(
+        p =>
+          String(
+            p.partner_key
+          ) ===
+          String(
+            partnerKey
+          )
+      )
+      .reduce(
+        (sum,p) =>
+          sum +
+          Number(
+            p.amount || 0
+          ),
+        0
+      );
 
   return {
     entitlement,
     paid,
-    remaining:Math.max(0, entitlement - paid)
+    remaining:
+      Math.max(
+        0,
+        entitlement -
+        paid
+      )
   };
 }
 
