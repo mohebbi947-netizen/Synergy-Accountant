@@ -553,7 +553,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V34-PREVIEW-ONLY-PROFIT-DISTRIBUTION";
+  "V34.1-EXPENSE-DESIGN-CATEGORY";
 
 document.documentElement
   .dataset
@@ -18025,12 +18025,84 @@ function editExpense(expense) {
           : ""
       )}
 
-      ${formField(
+      ${selectField(
         "دسته هزینه",
         "category",
-        "text",
-        "",
-        expense.category || ""
+        `
+          <option
+            ${String(expense.category || "") === "مدرس" ? "selected" : ""}
+          >
+            مدرس
+          </option>
+
+          <option
+            ${String(expense.category || "") === "دانشگاه" ? "selected" : ""}
+          >
+            دانشگاه
+          </option>
+
+          <option
+            ${String(expense.category || "") === "تبلیغات" ? "selected" : ""}
+          >
+            تبلیغات
+          </option>
+
+          <option
+            ${String(expense.category || "") === "طراحی" ? "selected" : ""}
+          >
+            طراحی
+          </option>
+
+          <option
+            ${String(expense.category || "") === "تجهیزات" ? "selected" : ""}
+          >
+            تجهیزات
+          </option>
+
+          <option
+            ${String(expense.category || "") === "پذیرایی" ? "selected" : ""}
+          >
+            پذیرایی
+          </option>
+
+          <option
+            ${String(expense.category || "") === "چاپ" ? "selected" : ""}
+          >
+            چاپ
+          </option>
+
+          <option
+            ${String(expense.category || "") === "سایر" ? "selected" : ""}
+          >
+            سایر
+          </option>
+
+          ${
+            expense.category &&
+            ![
+              "مدرس",
+              "دانشگاه",
+              "تبلیغات",
+              "طراحی",
+              "تجهیزات",
+              "پذیرایی",
+              "چاپ",
+              "سایر"
+            ].includes(
+              String(
+                expense.category
+              )
+            )
+              ? `
+                <option selected>
+                  ${esc(
+                    expense.category
+                  )}
+                </option>
+              `
+              : ""
+          }
+        `
       )}
 
       ${formField(
@@ -18283,6 +18355,7 @@ function newExpense(selectedCourse = null, paymentSource = "direct") {
             <option>مدرس</option>
             <option>دانشگاه</option>
             <option>تبلیغات</option>
+            <option>طراحی</option>
             <option>تجهیزات</option>
             <option>پذیرایی</option>
             <option>چاپ</option>
