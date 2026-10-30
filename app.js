@@ -552,7 +552,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V32.4-DISTRIBUTABLE-AFTER-PAYOUT";
+  "V32.5-PAYOUT-DEDUP-DELETE";
 
 document.documentElement
   .dataset
@@ -5153,6 +5153,177 @@ function renderStudentAnalytics() {
                   .join("")
               }
             </div>
+
+            <div
+              style="
+                margin-top:16px;
+                padding-top:14px;
+                border-top:
+                  1px solid
+                  rgba(255,255,255,.10);
+              "
+            >
+
+              <div class="panel-head">
+                <div>
+                  <h3>
+                    کل سوابق واریز به سهامداران
+                  </h3>
+
+                  <p>
+                    برای کنترل رکوردهای قدیمی یا تکراری
+                  </p>
+                </div>
+
+                <span class="count">
+                  ${faNum(
+                    validProfitDistributionPayments()
+                      .length
+                  )}
+                </span>
+              </div>
+
+
+              ${
+                validProfitDistributionPayments()
+                  .length
+                  ? `
+                    <div class="lead-list">
+
+                      ${
+                        validProfitDistributionPayments()
+                          .slice()
+                          .sort(
+                            (a,b) =>
+                              String(
+                                b.payment_date ||
+                                b.created_at ||
+                                ""
+                              ).localeCompare(
+                                String(
+                                  a.payment_date ||
+                                  a.created_at ||
+                                  ""
+                                )
+                              )
+                          )
+                          .map(
+                            p => {
+
+                              const snapshot =
+                                (
+                                  state.profitDistributions ||
+                                  []
+                                )
+                                  .find(
+                                    s =>
+                                      String(
+                                        s.distribution_id
+                                      ) ===
+                                      String(
+                                        p.distribution_id
+                                      )
+                                  );
+
+                              return `
+                                <div
+                                  class="lead-row"
+                                  style="cursor:default"
+                                >
+
+                                  <div class="avatar">
+                                    $
+                                  </div>
+
+
+                                  <div class="lead-main">
+
+                                    <b>
+                                      ${
+                                        p.partner_key ===
+                                          "partner_60"
+                                          ? "صاحب سهام ۶۰٪"
+                                          : "صاحب سهام ۴۰٪"
+                                      }
+                                    </b>
+
+                                    <span>
+                                      ${esc(
+                                        p.payment_method ||
+                                        "روش پرداخت نامشخص"
+                                      )}
+
+                                      ${
+                                        p.reference
+                                          ? ` · پیگیری: ${esc(
+                                              p.reference
+                                            )}`
+                                          : ""
+                                      }
+                                    </span>
+
+                                    <span>
+                                      Snapshot:
+                                      ${
+                                        snapshot
+                                          ? dateFa(
+                                              snapshot.distribution_date ||
+                                              snapshot.created_at
+                                            )
+                                          : "نامشخص"
+                                      }
+                                    </span>
+
+                                  </div>
+
+
+                                  <div class="lead-end">
+
+                                    <b>
+                                      ${shareholderMoney(
+                                        p.amount
+                                      )}
+                                    </b>
+
+                                    <small>
+                                      ${dateFa(
+                                        p.payment_date ||
+                                        p.created_at
+                                      )}
+                                    </small>
+
+                                    <button
+                                      type="button"
+                                      class="danger-action mini-edit-btn"
+                                      data-delete-profit-payment="${esc(
+                                        p.payment_id
+                                      )}"
+                                      style="margin-top:6px"
+                                    >
+                                      حذف
+                                    </button>
+
+                                  </div>
+
+                                </div>
+                              `;
+                            }
+                          )
+                          .join("")
+                      }
+
+                    </div>
+                  `
+                  : `
+                    <div class="empty">
+                      <b>
+                        هنوز واریزی ثبت نشده
+                      </b>
+                    </div>
+                  `
+              }
+
+            </div>
           `
           : `
             <div class="empty">
@@ -9086,9 +9257,101 @@ function renderExpenses() {
 
 
 
+function shareholderPaymentDedupKey(
+  item
+) {
+
+  /*
+    Older test/build versions could leave the same real-world payout
+    attached to more than one Snapshot. For reporting purposes, two
+    records are considered the same actual payout only when all of
+    these practical payment attributes match.
+
+    This avoids double-counting legacy duplicate rows while still
+    preserving genuinely separate future payouts.
+  */
+  return [
+    String(
+      item.partner_key || ""
+    ),
+    String(
+      Number(
+        item.amount || 0
+      )
+    ),
+    String(
+      item.payment_date || ""
+    ),
+    String(
+      item.payment_method || ""
+    )
+      .trim()
+      .toLowerCase(),
+    String(
+      item.reference || ""
+    )
+      .trim()
+      .toLowerCase()
+  ].join("|");
+}
+
+
+function validProfitDistributionPayments() {
+
+  const seen =
+    new Set();
+
+  const result = [];
+
+  (
+    state.profitDistributionPayments ||
+    []
+  )
+    .slice()
+    .sort(
+      (a,b) =>
+        String(
+          a.created_at || ""
+        ).localeCompare(
+          String(
+            b.created_at || ""
+          )
+        )
+    )
+    .forEach(
+      item => {
+
+        const key =
+          shareholderPaymentDedupKey(
+            item
+          );
+
+        if (
+          seen.has(key)
+        ) {
+          return;
+        }
+
+        seen.add(key);
+        result.push(item);
+      }
+    );
+
+  return result;
+}
+
+
 function totalDistributedProfitPaid() {
-  return (state.profitDistributionPayments || [])
-    .reduce((sum,item) => sum + Number(item.amount || 0), 0);
+
+  return validProfitDistributionPayments()
+    .reduce(
+      (sum,item) =>
+        sum +
+        Number(
+          item.amount || 0
+        ),
+      0
+    );
 }
 
 
@@ -9115,9 +9378,22 @@ function activeProfitDistributionSnapshot() {
     .sort((a,b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))[0] || null;
 }
 
-function distributionPaymentsFor(distributionId) {
-  return (state.profitDistributionPayments || [])
-    .filter(p => String(p.distribution_id || "") === String(distributionId || ""));
+function distributionPaymentsFor(
+  distributionId
+) {
+
+  return validProfitDistributionPayments()
+    .filter(
+      p =>
+        String(
+          p.distribution_id ||
+          ""
+        ) ===
+        String(
+          distributionId ||
+          ""
+        )
+    );
 }
 
 function partnerDistributionMetrics(
@@ -9535,6 +9811,17 @@ function renderFinance() {
                               <div class="lead-end">
                                 <b>${shareholderMoney(p.amount)}</b>
                                 <small>${dateFa(p.payment_date || p.created_at)}</small>
+
+                                <button
+                                  type="button"
+                                  class="danger-action mini-edit-btn"
+                                  data-delete-profit-payment="${esc(
+                                    p.payment_id
+                                  )}"
+                                  style="margin-top:6px"
+                                >
+                                  حذف
+                                </button>
                               </div>
                             </div>
                           `).join("")
@@ -10244,6 +10531,98 @@ function renderFinance() {
       );
     };
   });
+
+
+  $$("[data-delete-profit-payment]")
+    .forEach(
+      button => {
+
+        button.onclick =
+          async () => {
+
+            const payment =
+              (
+                state.profitDistributionPayments ||
+                []
+              )
+                .find(
+                  p =>
+                    String(
+                      p.payment_id
+                    ) ===
+                    String(
+                      button.dataset
+                        .deleteProfitPayment
+                    )
+                );
+
+            if (!payment) return;
+
+
+            const ok =
+              confirm(
+                `این واریز سود به مبلغ ${shareholderMoney(
+                  payment.amount
+                )} حذف شود؟\n\nبعد از حذف، مبلغ دوباره به مانده قابل پرداخت سهامدار و سود قابل تقسیم برمی‌گردد.`
+              );
+
+            if (!ok) return;
+
+
+            try {
+
+              button.disabled =
+                true;
+
+              button.textContent =
+                "در حال حذف...";
+
+
+              const result =
+                await post(
+                  "deleteProfitDistributionPayment",
+                  {
+                    payment_id:
+                      payment.payment_id
+                  }
+                );
+
+
+              if (!result?.success) {
+                throw new Error(
+                  result?.message ||
+                  "حذف واریز انجام نشد."
+                );
+              }
+
+
+              toast(
+                "واریز سود حذف شد و مانده‌ها اصلاح شدند"
+              );
+
+
+              await loadAll(
+                false
+              );
+
+
+            } catch (error) {
+
+              toast(
+                error.message ||
+                "حذف واریز انجام نشد.",
+                true
+              );
+
+              button.disabled =
+                false;
+
+              button.textContent =
+                "حذف";
+            }
+          };
+      }
+    );
 
 
   const expensesPageBtn =
