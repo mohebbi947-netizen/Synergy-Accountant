@@ -3778,3 +3778,146 @@ body{
     display:flex !important;
   }
 }
+
+
+/* =========================================================
+   V13.8 — PROFIT DISTRIBUTION MOBILE CONTRAST
+   Scoped only to shareholder profit distribution.
+========================================================= */
+
+.profit-distribution-section .profit-exact-amount{
+  white-space:nowrap !important;
+  direction:rtl !important;
+  unicode-bidi:plaintext !important;
+  font-variant-numeric:tabular-nums !important;
+  letter-spacing:0 !important;
+}
+
+@media(max-width:900px){
+
+  .profit-distribution-section{
+    background:
+      linear-gradient(
+        145deg,
+        rgba(24,28,58,.98),
+        rgba(49,32,70,.98)
+      ) !important;
+
+    border:
+      1px solid
+      rgba(255,255,255,.16) !important;
+
+    box-shadow:
+      0 18px 45px
+      rgba(0,0,0,.24) !important;
+
+    opacity:1 !important;
+    filter:none !important;
+  }
+
+  .profit-distribution-section,
+  .profit-distribution-section *{
+    opacity:1;
+  }
+
+  .profit-distribution-section .panel-head h3,
+  .profit-distribution-section .panel-head b,
+  .profit-distribution-section .panel-head strong{
+    color:#ffffff !important;
+  }
+
+  .profit-distribution-section .panel-head p,
+  .profit-distribution-section small,
+  .profit-distribution-section span{
+    color:rgba(255,255,255,.78) !important;
+  }
+
+  .profit-distribution-section .kpi,
+  .profit-distribution-section .panel{
+    background:
+      linear-gradient(
+        145deg,
+        rgba(42,48,83,.98),
+        rgba(76,50,91,.98)
+      ) !important;
+
+    border:
+      1px solid
+      rgba(255,255,255,.14) !important;
+
+    backdrop-filter:none !important;
+    -webkit-backdrop-filter:none !important;
+
+    opacity:1 !important;
+    filter:none !important;
+  }
+
+  .profit-distribution-section .kpi strong,
+  .profit-distribution-section .finance-strip strong,
+  .profit-distribution-section .lead-end b,
+  .profit-distribution-section .profit-exact-amount{
+    color:#ffffff !important;
+    opacity:1 !important;
+    text-shadow:none !important;
+  }
+
+  .profit-distribution-section .finance-strip > div{
+    background:
+      rgba(18,22,47,.72) !important;
+
+    border:
+      1px solid
+      rgba(255,255,255,.10) !important;
+  }
+
+  .profit-distribution-section .lead-row{
+    background:
+      rgba(18,22,47,.62) !important;
+
+    border:
+      1px solid
+      rgba(255,255,255,.09) !important;
+  }
+
+  .profit-distribution-section .primary{
+    opacity:1 !important;
+    filter:none !important;
+  }
+
+  .profit-distribution-section .profit-exact-amount{
+    display:block !important;
+    width:100% !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    white-space:nowrap !important;
+    font-size:clamp(18px,5.2vw,32px) !important;
+    line-height:1.35 !important;
+  }
+
+  .profit-distribution-section .kpi{
+    min-width:0 !important;
+  }
+
+  .profit-distribution-section .two-col{
+    grid-template-columns:1fr !important;
+  }
+
+  .profit-distribution-section .finance-strip{
+    grid-template-columns:1fr !important;
+  }
+}
+
+@media(max-width:430px){
+
+  .profit-distribution-section{
+    padding:14px !important;
+  }
+
+  .profit-distribution-section .kpi-grid{
+    grid-template-columns:1fr !important;
+  }
+
+  .profit-distribution-section .profit-exact-amount{
+    font-size:22px !important;
+  }
+}
