@@ -98,6 +98,35 @@ function money(v) {
 }
 
 
+/*
+  Exact financial display for shareholder distribution.
+  - full integer amount
+  - no compact notation
+  - no decimal rounding in UI
+  - Persian thousands separators
+*/
+function moneyExact(v) {
+
+  const amount =
+    Math.round(
+      Number(v || 0)
+    );
+
+  return (
+    new Intl.NumberFormat(
+      "fa-IR",
+      {
+        useGrouping:true,
+        maximumFractionDigits:0,
+        minimumFractionDigits:0
+      }
+    ).format(amount) +
+    " " +
+    (C.CURRENCY || "تومان")
+  );
+}
+
+
 function rawNumber(v) {
   return String(v ?? "")
     .replace(/[,\u066C\u060C\s]/g, "")
@@ -469,7 +498,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V32-PROFIT-DISTRIBUTION-SNAPSHOTS";
+  "V32.1-PROFIT-EXACT-MOBILE-CONTRAST";
 
 document.documentElement
   .dataset
@@ -9008,6 +9037,24 @@ function totalDistributedProfitPaid() {
     .reduce((sum,item) => sum + Number(item.amount || 0), 0);
 }
 
+
+function totalSnapshottedProfit() {
+
+  return (
+    state.profitDistributions ||
+    []
+  )
+    .reduce(
+      (sum,item) =>
+        sum +
+        Number(
+          item.distributable_amount ||
+          0
+        ),
+      0
+    );
+}
+
 function activeProfitDistributionSnapshot() {
   return (state.profitDistributions || [])
     .slice()
@@ -9039,13 +9086,30 @@ function partnerDistributionMetrics(snapshot, partnerKey) {
 }
 
 function currentDistributableProfitForSnapshot() {
-  const realized = realizedFinanceSnapshot();
-  const petty = pettyCashMetrics();
-  const alreadyPaid = totalDistributedProfitPaid();
+
+  const realized =
+    realizedFinanceSnapshot();
+
+  const petty =
+    pettyCashMetrics();
+
+  /*
+    A profit amount is reserved for shareholders as soon as a Snapshot
+    is created — not only after it is actually paid.
+
+    Therefore a new Snapshot must contain ONLY profit generated after
+    earlier Snapshots. This prevents the same profit being allocated twice.
+  */
+  const alreadySnapshotted =
+    totalSnapshottedProfit();
 
   return Math.max(
     0,
-    realized.profit - petty.balance - alreadyPaid
+    Math.round(
+      realized.profit -
+      petty.balance -
+      alreadySnapshotted
+    )
   );
 }
 
@@ -9065,7 +9129,7 @@ function openProfitDistributionPayment(snapshot, partnerKey) {
     <div class="modal-title">
       <span>PROFIT DISTRIBUTION PAYMENT</span>
       <h2>ثبت واریز سود</h2>
-      <p>${partnerLabel} · مانده قابل پرداخت: ${money(metrics.remaining)}</p>
+      <p>${partnerLabel} · مانده قابل پرداخت: ${moneyExact(metrics.remaining)}</p>
     </div>
 
     <form id="profitDistributionPaymentForm" class="form-grid">
@@ -9236,7 +9300,10 @@ function renderFinance() {
 
 
 
-    <section class="panel" style="margin-top:14px">
+    <section
+      class="panel profit-distribution-section"
+      style="margin-top:14px"
+    >
       <div class="panel-head">
         <div>
           <h3>توزیع سود صاحبان سهام</h3>
@@ -9253,22 +9320,22 @@ function renderFinance() {
             <div class="kpi-grid" style="margin-top:10px">
               <div class="kpi success">
                 <span>مبلغ Snapshot</span>
-                <strong>${money(activeDistribution.distributable_amount)}</strong>
+                <strong class="profit-exact-amount">${moneyExact(activeDistribution.distributable_amount)}</strong>
                 <small>${dateFa(activeDistribution.distribution_date || activeDistribution.created_at)}</small>
               </div>
               <div class="kpi">
                 <span>پرداخت‌شده از این Snapshot</span>
-                <strong>${money(partner60.paid + partner40.paid)}</strong>
+                <strong class="profit-exact-amount">${moneyExact(partner60.paid + partner40.paid)}</strong>
                 <small>مجموع واریز به صاحبان سهام</small>
               </div>
               <div class="kpi warning">
                 <span>مانده Snapshot</span>
-                <strong>${money(partner60.remaining + partner40.remaining)}</strong>
+                <strong class="profit-exact-amount">${moneyExact(partner60.remaining + partner40.remaining)}</strong>
                 <small>هنوز قابل پرداخت</small>
               </div>
               <div class="kpi">
                 <span>سود جدیدِ هنوز محاسبه‌نشده</span>
-                <strong>${money(undistributedNow)}</strong>
+                <strong class="profit-exact-amount">${moneyExact(undistributedNow)}</strong>
                 <small>تا محاسبه بعدی وارد Snapshot جدید نمی‌شود</small>
               </div>
             </div>
@@ -9279,9 +9346,9 @@ function renderFinance() {
                   <div><h3>صاحب سهام ۶۰٪</h3><p>سهم از Snapshot فعلی</p></div>
                 </div>
                 <div class="finance-strip">
-                  <div><span>سهم تعلق‌گرفته</span><strong>${money(partner60.entitlement)}</strong></div>
-                  <div><span>پرداخت‌شده</span><strong>${money(partner60.paid)}</strong></div>
-                  <div><span>مانده قابل پرداخت</span><strong>${money(partner60.remaining)}</strong></div>
+                  <div><span>سهم تعلق‌گرفته</span><strong class="profit-exact-amount">${moneyExact(partner60.entitlement)}</strong></div>
+                  <div><span>پرداخت‌شده</span><strong class="profit-exact-amount">${moneyExact(partner60.paid)}</strong></div>
+                  <div><span>مانده قابل پرداخت</span><strong class="profit-exact-amount">${moneyExact(partner60.remaining)}</strong></div>
                 </div>
                 <button
                   type="button"
@@ -9299,9 +9366,9 @@ function renderFinance() {
                   <div><h3>صاحب سهام ۴۰٪</h3><p>سهم از Snapshot فعلی</p></div>
                 </div>
                 <div class="finance-strip">
-                  <div><span>سهم تعلق‌گرفته</span><strong>${money(partner40.entitlement)}</strong></div>
-                  <div><span>پرداخت‌شده</span><strong>${money(partner40.paid)}</strong></div>
-                  <div><span>مانده قابل پرداخت</span><strong>${money(partner40.remaining)}</strong></div>
+                  <div><span>سهم تعلق‌گرفته</span><strong class="profit-exact-amount">${moneyExact(partner40.entitlement)}</strong></div>
+                  <div><span>پرداخت‌شده</span><strong class="profit-exact-amount">${moneyExact(partner40.paid)}</strong></div>
+                  <div><span>مانده قابل پرداخت</span><strong class="profit-exact-amount">${moneyExact(partner40.remaining)}</strong></div>
                 </div>
                 <button
                   type="button"
@@ -9342,7 +9409,7 @@ function renderFinance() {
                                 </span>
                               </div>
                               <div class="lead-end">
-                                <b>${money(p.amount)}</b>
+                                <b>${moneyExact(p.amount)}</b>
                                 <small>${dateFa(p.payment_date || p.created_at)}</small>
                               </div>
                             </div>
@@ -10006,7 +10073,7 @@ function renderFinance() {
 
       const ok =
         confirm(
-          `مبلغ ${money(available)} به عنوان Snapshot جدید سود قابل تقسیم ثبت شود؟\n\nسهم ۶۰٪ و ۴۰٪ بر اساس همین مبلغ محاسبه می‌شود و سودهای بعدی تا محاسبه بعدی به این Snapshot اضافه نمی‌شوند.`
+          `مبلغ ${moneyExact(available)} به عنوان Snapshot جدید سود قابل تقسیم ثبت شود؟\n\nسهم ۶۰٪ و ۴۰٪ بر اساس همین مبلغ محاسبه می‌شود و سودهای بعدی تا محاسبه بعدی به این Snapshot اضافه نمی‌شوند.`
         );
 
       if (!ok) return;
