@@ -552,7 +552,7 @@ const JALALI_MONTHS = [
 ];
 
 const APP_BUILD =
-  "V32.5-PAYOUT-DEDUP-DELETE";
+  "V33-AUTO-PETTY-TOPUP-10M";
 
 document.documentElement
   .dataset
@@ -7847,26 +7847,146 @@ function pettyCashMetrics() {
 
 function newPettyCashReserve() {
 
+  const PETTY_CASH_TARGET =
+    10000; // 10,000,000 toman
+
+  const petty =
+    pettyCashMetrics();
+
+  const currentBalance =
+    Number(
+      petty.balance || 0
+    );
+
+  const requiredTopUp =
+    Math.max(
+      0,
+      PETTY_CASH_TARGET -
+      currentBalance
+    );
+
+
+  if (
+    requiredTopUp <= 0
+  ) {
+    toast(
+      "مانده تنخواه در حال حاضر ۱۰,۰۰۰,۰۰۰ تومان یا بیشتر است و نیازی به شارژ ندارد.",
+      true
+    );
+    return;
+  }
+
+
   modal(`
 
     <div class="modal-title">
-      <span>PETTY CASH</span>
-      <h2>شارژ تنخواه مدیر</h2>
+      <span>
+        AUTO PETTY CASH TOP-UP
+      </span>
+
+      <h2>
+        شارژ خودکار تنخواه
+      </h2>
+
       <p>
-        این مبلغ هزینه نیست؛ فقط از مبلغ قابل تقسیم خارج و برای عملیات آکادمی رزرو می‌شود.
+        هدف تنخواه همیشه
+        <b>
+          ۱۰,۰۰۰,۰۰۰ تومان
+        </b>
+        است. سیستم اختلاف موجودی فعلی تا این مبلغ را خودش محاسبه می‌کند.
       </p>
     </div>
+
+
+    <div
+      class="kpi-grid"
+      style="
+        margin-top:0;
+        margin-bottom:14px;
+      "
+    >
+
+      <div class="kpi">
+        <span>
+          هدف تنخواه
+        </span>
+
+        <strong>
+          ${shareholderMoney(
+            PETTY_CASH_TARGET
+          )}
+        </strong>
+
+        <small>
+          مبلغ ثابت هدف
+        </small>
+      </div>
+
+
+      <div class="kpi warning">
+        <span>
+          مانده فعلی
+        </span>
+
+        <strong>
+          ${shareholderMoney(
+            currentBalance
+          )}
+        </strong>
+
+        <small>
+          قبل از شارژ
+        </small>
+      </div>
+
+
+      <div class="kpi success">
+        <span>
+          مبلغ موردنیاز برای شارژ
+        </span>
+
+        <strong>
+          ${shareholderMoney(
+            requiredTopUp
+          )}
+        </strong>
+
+        <small>
+          دقیقاً تا رسیدن به ۱۰ میلیون تومان
+        </small>
+      </div>
+
+    </div>
+
 
     <form
       id="pettyCashReserveForm"
       class="form-grid"
     >
 
-      ${formField(
-        "مبلغ شارژ",
-        "amount",
-        "number"
-      )}
+      <div
+        class="field full"
+        style="
+          justify-content:center;
+          line-height:1.9;
+        "
+      >
+        <span>
+          مبلغ شارژ به صورت خودکار محاسبه شده است
+        </span>
+
+        <b
+          style="
+            font-size:18px;
+            margin-top:4px;
+          "
+        >
+          ${shareholderMoney(
+            requiredTopUp
+          )}
+        </b>
+      </div>
+
 
       ${formField(
         "تاریخ",
@@ -7874,19 +7994,21 @@ function newPettyCashReserve() {
         "date"
       )}
 
+
       ${formField(
         "شرح",
         "description",
         "text",
         "",
-        "شارژ تنخواه مدیر"
+        "شارژ خودکار تنخواه تا ۱۰ میلیون تومان"
       )}
+
 
       <button
         class="primary full submit"
         type="submit"
       >
-        ثبت شارژ تنخواه
+        شارژ خودکار تا ۱۰,۰۰۰,۰۰۰ تومان
       </button>
 
     </form>
@@ -7904,32 +8026,87 @@ function newPettyCashReserve() {
             e.target
           );
 
-        const amount =
-          Number(
-            rawNumber(
-              data.amount
-            ) || 0
+
+        try {
+
+          const submitButton =
+            e.target.querySelector(
+              ".submit"
+            );
+
+          if (submitButton) {
+            submitButton.disabled =
+              true;
+
+            submitButton.textContent =
+              "در حال محاسبه و شارژ...";
+          }
+
+
+          /*
+            Do NOT send the calculated amount as the source of truth.
+            The backend re-reads the live petty-cash balance and computes
+            the exact difference to 10,000,000 toman at submit time.
+          */
+          const result =
+            await post(
+              "autoTopUpPettyCash",
+              {
+                transaction_date:
+                  data.transaction_date ||
+                  "",
+                description:
+                  data.description ||
+                  "شارژ خودکار تنخواه تا ۱۰ میلیون تومان"
+              }
+            );
+
+
+          if (!result?.success) {
+            throw new Error(
+              result?.message ||
+              "شارژ خودکار تنخواه انجام نشد."
+            );
+          }
+
+
+          closeModal();
+
+
+          toast(
+            result.message ||
+            "تنخواه تا ۱۰,۰۰۰,۰۰۰ تومان شارژ شد"
           );
 
-        if (amount <= 0) {
+
+          await loadAll(
+            false
+          );
+
+
+        } catch (error) {
+
           toast(
-            "مبلغ شارژ باید بیشتر از صفر باشد.",
+            error.message ||
+            "شارژ خودکار تنخواه انجام نشد.",
             true
           );
-          return;
-        }
 
-        await submitPost(
-          "createPettyCashReserve",
-          {
-            ...data,
-            amount
-          },
-          "تنخواه شارژ شد"
-        );
+          const submitButton =
+            e.target.querySelector(
+              ".submit"
+            );
+
+          if (submitButton) {
+            submitButton.disabled =
+              false;
+
+            submitButton.textContent =
+              "شارژ خودکار تا ۱۰,۰۰۰,۰۰۰ تومان";
+          }
+        }
       };
 }
-
 
 function returnPettyCash() {
 
@@ -9865,7 +10042,7 @@ function renderFinance() {
         <div>
           <h3>تنخواه و سود قابل تقسیم</h3>
           <p>
-            مانده تنخواه تا زمان مصرف یا برگشت تقسیم نمی‌شود. واریز واقعی سود به سهامداران نیز از مانده سود قابل تقسیم کم می‌شود، بدون اینکه هزینه یا سود خالص را تغییر دهد.
+            هدف تنخواه ۱۰,۰۰۰,۰۰۰ تومان است. در شارژ خودکار، سیستم مانده فعلی را از ۱۰ میلیون کم می‌کند و فقط کسری را شارژ می‌کند. مانده تنخواه تا زمان مصرف یا برگشت تقسیم نمی‌شود.
           </p>
         </div>
 
@@ -9880,7 +10057,7 @@ function renderFinance() {
             class="primary"
             data-action="newPettyCashReserve"
           >
-            ＋ شارژ تنخواه
+            ＋ شارژ خودکار تنخواه
           </button>
 
           <button
